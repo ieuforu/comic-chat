@@ -181,11 +181,30 @@ const styles = stylex.create({
     marginBottom: 16,
     flexShrink: 0,
   },
+  titleBlock: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 5,
+    minWidth: 0,
+  },
   comicTitle: {
     margin: 0,
     fontSize: 22,
     textTransform: "uppercase",
     letterSpacing: "0.05em",
+  },
+  buildBadge: {
+    fontFamily: "monospace",
+    fontSize: 10,
+    fontWeight: "bold",
+    letterSpacing: "0.04em",
+    padding: "2px 8px",
+    border: "2px solid #000000",
+    backgroundColor: "#000000",
+    color: "#fef08a",
+    boxShadow: "2px 2px 0px #eab308",
+    whiteSpace: "nowrap",
   },
   presenceBadge: {
     display: "flex",
@@ -1144,7 +1163,12 @@ export default function App() {
       <div {...stylex.props(styles.comicPanel)}>
         {/* 标题栏 */}
         <div {...stylex.props(styles.panelHeader)}>
-          <h1 {...stylex.props(styles.comicTitle)}>PANEL // DIALOGUE</h1>
+          <div {...stylex.props(styles.titleBlock)}>
+            <h1 {...stylex.props(styles.comicTitle)}>PANEL // DIALOGUE</h1>
+            <span {...stylex.props(styles.buildBadge)} title="当前页面加载的前端 build">
+              BUILD {LOADED_BUILD_ID || "dev"}
+            </span>
+          </div>
           <div {...stylex.props(styles.presenceBadge)}>
             <span>⚡</span>
             <span>{connected ? `ONLINE: ${onlineCount}` : retrying ? "重连中…" : "OFFLINE"}</span>
