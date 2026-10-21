@@ -103,6 +103,18 @@ func (s *SessionStore) profileFor(sessionID string) Profile {
 	}
 }
 
+// DisplayName resolves the current sender label for a session. History rows store
+// a sender string from the time they were written; resolving through this method
+// at read time makes an operator rename apply to old messages too, without a
+// database migration or per-row writes.
+func (s *SessionStore) DisplayName(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+
+	return s.profileFor(sessionID).Display()
+}
+
 // OnNamesChanged forwards name-file changes so the transport layer can tell clients.
 func (s *SessionStore) OnNamesChanged(fn func(prefix, display string)) {
 	if s.names == nil {

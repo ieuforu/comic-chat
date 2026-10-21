@@ -842,7 +842,17 @@ export default function App() {
           });
         }
       } else if (payload.type === "profile") {
-        // 运营者改了某个会话的昵称：如果是我自己，立刻重新取一次身份
+        // 运营者改了某个会话的昵称：把已经加载的消息也一起改掉，历史气泡不需要刷新。
+        if (payload.clientId && payload.name) {
+          const prefix = payload.clientId;
+          const sender = payload.name;
+
+          setMessages((prev) =>
+            prev.map((msg) => (msg.clientId?.startsWith(prefix) ? { ...msg, sender } : msg)),
+          );
+        }
+
+        // 如果是我自己，立刻重新取一次身份
         if (sessionID && payload.clientId && sessionID.startsWith(payload.clientId)) {
           fetch("/api/session", { credentials: "same-origin" })
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))

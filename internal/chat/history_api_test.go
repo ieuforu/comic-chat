@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -108,5 +110,59 @@ func TestHistoryAPIPagesBackwards(t *testing.T) {
 
 	if len(page.Messages) != 4 || page.HasMore {
 		t.Fatalf("huge page = %d messages, hasMore=%v", len(page.Messages), page.HasMore)
+	}
+}
+
+func TestHistoryAPIResolvesCurrentSender(t *testing.T) {
+	history, _ := newTestHistory(t, 0)
+	t.Cleanup(func() { _ = history.Close() })
+
+	history.Append(EventMessage{
+		Type:     "chat",
+		Seq:      1,
+		ClientId: "session-1",
+		Sender:   "old sender",
+		Content:  "m",
+		Time:     "12:00:00",
+	})
+	waitForHistory(t, history, 1)
+
+	store := newTestStore(t)
+	writeNames(t, filepath.Dir(store.names.path), `{"names":{"sessi":"新名字"}}`)
+	store.names.interval = 0
+
+	srv := httptest.NewServer(Routes(Deps{
+		Hub:      NewHub(),
+		Sessions: store,
+		History:  history,
+		StaticFS: testStaticFS(),
+	}))
+	t.Cleanup(srv.Close)
+
+	cookie := newSession(t, srv)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/history?before=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.AddCookie(cookie)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET history: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	var page historyPage
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(page.Messages) != 1 || !strings.Contains(page.Messages[0].Sender, "新名字") {
+		t.Fatalf("sender = %q, want it to contain 新名字", page.Messages[0].Sender)
 	}
 }

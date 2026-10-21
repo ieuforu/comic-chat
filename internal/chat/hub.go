@@ -137,6 +137,10 @@ type Hub struct {
 	// buildID is the embedded frontend version, read by snapshots. Atomic because
 	// tests set it after Run has started and a deploy never needs to touch it live.
 	buildID atomic.Value
+	// senderResolver maps a stored session id to the sender label to show now.
+	// History rows keep the sender from write time; resolving on read lets a rename
+	// apply to old messages without rewriting them.
+	senderResolver atomic.Value
 	// rateLimited counts chats that exceeded the bucket (dropped in enforce mode,
 	// only counted in log mode).
 	rateLimited atomic.Int64
@@ -206,6 +210,32 @@ func (h *Hub) BuildID() string {
 	}
 
 	return ""
+}
+
+// SetSenderResolver installs the function used to refresh sender labels on
+// historical messages. Safe to call at any time; snapshots use the latest value.
+func (h *Hub) SetSenderResolver(resolve func(sessionID string) string) {
+	h.senderResolver.Store(resolve)
+}
+
+// resolveSenders rewrites the sender field of a history copy using the current
+// session profile. It only touches messages that carry a session id; legacy rows
+// without one keep their stored sender.
+func (h *Hub) resolveSenders(messages []EventMessage) {
+	resolve, ok := h.senderResolver.Load().(func(string) string)
+	if !ok || resolve == nil {
+		return
+	}
+
+	for i := range messages {
+		if messages[i].ClientId == "" {
+			continue
+		}
+
+		if sender := resolve(messages[i].ClientId); sender != "" {
+			messages[i].Sender = sender
+		}
+	}
 }
 
 // ConnectionCount and UserCount are safe to call from any goroutine.
@@ -347,6 +377,7 @@ func (h *Hub) Run() {
 			// historySinceLocked takes the read lock itself; Online counts people
 			// (not sockets) so a reconnect from a second tab does not inflate it.
 			historyCopy, truncated := h.historySinceLocked(client.since)
+			h.resolveSenders(historyCopy)
 
 			profile := client.currentProfile()
 

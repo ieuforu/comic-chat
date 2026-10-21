@@ -59,6 +59,17 @@ func historyRoutes(mux *http.ServeMux, history *HistoryStore, sessions *SessionS
 			return
 		}
 
+		// The row keeps the sender from write time; show the current name instead.
+		for i := range messages {
+			if messages[i].ClientId == "" {
+				continue
+			}
+
+			if sender := sessions.DisplayName(messages[i].ClientId); sender != "" {
+				messages[i].Sender = sender
+			}
+		}
+
 		writeJSON(w, http.StatusOK, historyPage{Messages: messages, HasMore: hasMore})
 	})
 }

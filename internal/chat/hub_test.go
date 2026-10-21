@@ -219,6 +219,57 @@ func TestSnapshotOnConnect(t *testing.T) {
 	}
 }
 
+func TestResolveSendersUsesCurrentProfile(t *testing.T) {
+	hub := NewHub()
+	hub.SetSenderResolver(func(sessionID string) string { return "current-" + sessionID })
+
+	messages := []EventMessage{
+		{ClientId: "s1", Sender: "old"},
+		{ClientId: "", Sender: "legacy"},
+	}
+
+	hub.resolveSenders(messages)
+
+	if messages[0].Sender != "current-s1" {
+		t.Fatalf("resolved sender = %q, want current-s1", messages[0].Sender)
+	}
+
+	if messages[1].Sender != "legacy" {
+		t.Fatalf("legacy sender changed to %q", messages[1].Sender)
+	}
+}
+
+func TestSnapshotResolvesHistoricalSenders(t *testing.T) {
+	hub := NewHub()
+	hub.Restore([]EventMessage{{
+		Type:     "chat",
+		Seq:      1,
+		ClientId: "s1",
+		Sender:   "old",
+		Content:  "m",
+		Time:     "12:00:00",
+	}}, 1)
+	hub.SetSenderResolver(func(sessionID string) string { return "resolved-" + sessionID })
+	go hub.Run()
+
+	srv := httptest.NewServer(Routes(Deps{
+		Hub:      hub,
+		Sessions: newTestStore(t),
+		StaticFS: testStaticFS(),
+	}))
+	t.Cleanup(func() {
+		hub.Shutdown()
+		srv.Close()
+	})
+
+	conn := dial(t, srv)
+	snapshot := readUntil(t, conn, "snapshot")
+
+	if len(snapshot.History) != 1 || snapshot.History[0].Sender != "resolved-s1" {
+		t.Fatalf("snapshot history = %+v, want resolved-s1", snapshot.History)
+	}
+}
+
 func TestSnapshotCarriesBuildID(t *testing.T) {
 	srv, hub, _ := newTestServer(t)
 	hub.SetBuildID("build-test-123")

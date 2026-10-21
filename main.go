@@ -58,6 +58,11 @@ func main() {
 	stateDir := chat.StateDirectory()
 	store := chat.NewSessionStore(stateDir)
 
+	// Historical messages store the sender at write time. Resolve it through the
+	// current session profile when a snapshot is built, so a rename also applies to
+	// messages that were sent before it.
+	hub.SetSenderResolver(store.DisplayName)
+
 	// Persistence and media are optional: if the database cannot be opened the chat
 	// still runs, it just forgets messages on restart and cannot accept images.
 	var history *chat.HistoryStore
