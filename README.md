@@ -57,8 +57,8 @@ systemd 单元。服务器地址、部署路径、单元名都通过环境变量
 `index.html` 返回 `Cache-Control: no-store`，`/assets/*`（Vite 带 hash）返回
 `immutable`，避免刷新后仍拿到旧 shell，或新旧 chunk 混用。
 
-> 首次上线这个机制前已经打开的页面没有 `app-build` meta，需要手动刷新一次；之后部署
-> 都会自动处理。
+> 首次上线这个机制前已经打开的页面没有 `app-build` meta，且旧 `index.html` 可能还被
+> 浏览器缓存，需要手动**硬刷新**一次（Cmd/Ctrl+Shift+R）；之后部署都会自动处理。
 
 ## 身份
 
