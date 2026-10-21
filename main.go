@@ -34,6 +34,22 @@ func main() {
 		log.Fatalf("无法加载嵌入静态资源: %v", err)
 	}
 
+	// The build id is derived from the embedded bytes, so it changes exactly when
+	// the SPA does. It is injected into index.html and sent in every snapshot, which
+	// is how an already-open page learns that a deploy happened.
+	assets, err := chat.LoadStatic(staticFS)
+	if err != nil {
+		log.Fatalf("无法读取嵌入静态资源: %v", err)
+	}
+
+	hub.SetBuildID(assets.BuildID)
+
+	if len(assets.IndexHTML) == 0 {
+		log.Println("警告: web/dist/index.html 缺失，页面将返回 404（先运行 make frontend）")
+	} else {
+		log.Printf("前端 build: %s", assets.BuildID)
+	}
+
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"
@@ -81,10 +97,11 @@ func main() {
 	srv := &http.Server{
 		Addr: addr,
 		Handler: chat.Routes(chat.Deps{
-			Hub:      hub,
-			Sessions: store,
-			Media:    media,
-			StaticFS: staticFS,
+			Hub:       hub,
+			Sessions:  store,
+			Media:     media,
+			StaticFS:  staticFS,
+			IndexHTML: assets.IndexHTML,
 		}),
 		// Without a header timeout a client can hold a connection open by
 		// dribbling bytes and slowly exhaust the listener.

@@ -219,6 +219,18 @@ func TestSnapshotOnConnect(t *testing.T) {
 	}
 }
 
+func TestSnapshotCarriesBuildID(t *testing.T) {
+	srv, hub, _ := newTestServer(t)
+	hub.SetBuildID("build-test-123")
+
+	conn := dial(t, srv)
+	snapshot := readUntil(t, conn, "snapshot")
+
+	if snapshot.BuildID != "build-test-123" {
+		t.Fatalf("buildId = %q, want build-test-123", snapshot.BuildID)
+	}
+}
+
 func TestHandshakeRequiresSession(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	url := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -17,13 +18,44 @@ type Deps struct {
 	Sessions *SessionStore
 	Media    *MediaStore
 	StaticFS fs.FS
+	// IndexHTML is the SPA shell with the build id injected. When nil, Routes reads
+	// index.html from StaticFS (which keeps tests and small embeddings working).
+	IndexHTML []byte
 }
 
 func Routes(deps Deps) http.Handler {
 	hub, store, staticFS := deps.Hub, deps.Sessions, deps.StaticFS
 
+	indexHTML := deps.IndexHTML
+	if indexHTML == nil {
+		if data, err := fs.ReadFile(staticFS, "index.html"); err == nil {
+			indexHTML = data
+		}
+	}
+
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux := http.NewServeMux()
+
+	serveIndex := func(w http.ResponseWriter, r *http.Request) {
+		if indexHTML == nil {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		// The shell must never be cached: it is the only place that points at the
+		// hashed assets, so a stale copy would keep an old page alive across deploys.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+
+		if r.Method == http.MethodHead {
+			return
+		}
+
+		_, _ = w.Write(indexHTML)
+	}
 
 	store.routes(mux)
 	mediaRoutes(mux, deps.Media, store)
@@ -75,20 +107,46 @@ func Routes(deps Deps) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// The SPA fallback must not swallow unknown API paths: a typo or a removed
 		// endpoint should answer 404 JSON, not index.html with status 200.
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 
 			return
 		}
 
-		path := strings.TrimPrefix(r.URL.Path, "/")
-		if path == "" {
-			path = "index.html"
+		rel := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if rel == "" || rel == "index.html" {
+			serveIndex(w, r)
+
+			return
 		}
 
-		if _, err := fs.Stat(staticFS, path); err != nil {
-			// 文件不存在（例如刷新子路由），回退到 index.html 交给前端路由接管
-			r.URL.Path = "/"
+		info, err := fs.Stat(staticFS, rel)
+		if err == nil && info.IsDir() {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		if err != nil {
+			// Missing asset must 404: returning index.html would make the browser
+			// parse HTML as JavaScript and hide the real problem.
+			if strings.HasPrefix(rel, "assets/") || path.Ext(rel) != "" {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			// Missing extension-less path (a client-side route): let the SPA handle it.
+			serveIndex(w, r)
+
+			return
+		}
+
+		if strings.HasPrefix(rel, "assets/") {
+			// Vite fingerprints these names, so the bytes at a URL never change.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
 		}
 
 		fileServer.ServeHTTP(w, r)

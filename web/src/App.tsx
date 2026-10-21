@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as stylex from "@stylexjs/stylex";
 
 interface EventMessage {
@@ -12,6 +12,7 @@ interface EventMessage {
   isTyping?: boolean;
   seq?: number;
   truncated?: boolean;
+  buildId?: string;
   connections?: number;
   notice?: string;
   name?: string;
@@ -32,6 +33,25 @@ interface EffectItem {
 
 
 const SFX_WORDS = ["POW!", "BOOM!", "BAM!", "KAPOW!", "WHAM!", "ZAP!"];
+
+const DRAFT_KEY = "comic:draft";
+
+// 页面真正加载到的前端版本。旧页面会一直保留旧值，直到它被 reload。
+const LOADED_BUILD_ID =
+  typeof document === "undefined"
+    ? ""
+    : (document.querySelector<HTMLMetaElement>('meta[name="app-build"]')?.content ?? "");
+
+// 刷新/部署后恢复未发送的草稿；sessionStorage 按标签页隔离。
+const readDraft = (): string => {
+  if (typeof sessionStorage === "undefined") return "";
+
+  try {
+    return sessionStorage.getItem(DRAFT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+};
 
 // 漫画拟声词爆发动画
 const burstAnim = stylex.keyframes({
@@ -256,6 +276,19 @@ const styles = stylex.create({
     animationDuration: "1.2s",
     animationIterationCount: "infinite",
   },
+  updateBanner: {
+    alignSelf: "center",
+    backgroundColor: "#fef08a",
+    color: "#000000",
+    border: "3px solid #000000",
+    boxShadow: "3px 3px 0px #000000",
+    padding: "4px 12px",
+    marginBottom: 4,
+    fontSize: 12,
+    fontFamily: "monospace",
+    fontWeight: "bold",
+    flexShrink: 0,
+  },
   inputAreaWrapper: {
     position: "relative",
     display: "flex",
@@ -375,10 +408,11 @@ export default function App() {
 
   const [messages, setMessages] = useState<EventMessage[]>([]);
   const [onlineCount, setOnlineCount] = useState<number>(1);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(readDraft);
   const [connected, setConnected] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [rateNotice, setRateNotice] = useState("");
+  const [updateNotice, setUpdateNotice] = useState("");
   const [uploading, setUploading] = useState(false);
   // 点击图片后全屏查看
   const [zoomed, setZoomed] = useState<string | null>(null);
@@ -394,6 +428,48 @@ export default function App() {
   const wsRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef(input);
+  const uploadingRef = useRef(false);
+  const pendingReloadRef = useRef(false);
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+    };
+  }, []);
+
+  // 服务端 build 变化后，尽量在不丢输入的前提下刷新：
+  // 空闲时自动 reload；有草稿或正在上传时等状态结束，由对应 handler 再次调用。
+  const maybeReload = useCallback(() => {
+    if (!pendingReloadRef.current) return;
+
+    if (uploadingRef.current) {
+      setUpdateNotice("服务端已更新，上传完成后自动刷新…");
+      return;
+    }
+
+    if (inputRef.current.trim() !== "") {
+      setUpdateNotice("服务端已更新，发送后自动刷新…");
+      return;
+    }
+
+    setUpdateNotice("服务端已更新，正在刷新…");
+
+    if (reloadTimerRef.current) return;
+
+    reloadTimerRef.current = setTimeout(() => {
+      reloadTimerRef.current = null;
+
+      try {
+        sessionStorage.setItem(DRAFT_KEY, inputRef.current);
+      } catch {
+        // ignore
+      }
+
+      window.location.reload();
+    }, 900);
+  }, []);
 
   // 触发本地拟声词爆发
   const triggerFx = () => {
@@ -417,7 +493,22 @@ export default function App() {
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setInput(e.target.value);
+    const value = e.target.value;
+    setInput(value);
+    inputRef.current = value;
+
+    try {
+      if (value) sessionStorage.setItem(DRAFT_KEY, value);
+      else sessionStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // ignore
+    }
+
+    // 用户开始输入时取消已经排队的刷新；否则会在他打字时 reload。
+    if (reloadTimerRef.current) {
+      clearTimeout(reloadTimerRef.current);
+      reloadTimerRef.current = null;
+    }
 
     // 广播正在输入
     broadcastTyping(true);
@@ -427,6 +518,9 @@ export default function App() {
     typingTimeoutRef.current = setTimeout(() => {
       broadcastTyping(false);
     }, 1800);
+
+    // 输入被清空（例如草稿删掉）时，如果服务端有新版本就立即刷新。
+    maybeReload();
   };
 
   useEffect(() => {
@@ -489,6 +583,14 @@ export default function App() {
               ? prev
               : me,
           );
+        }
+
+        // 部署后旧页面重连会看到新的 buildId：先标记，等输入区空闲再刷新。
+        // 开发模式下 Vite 的 index.html 没有 meta，因此两边都为空时不会误触发。
+        if (LOADED_BUILD_ID && payload.buildId && payload.buildId !== LOADED_BUILD_ID) {
+          pendingReloadRef.current = true;
+          setUpdateNotice("服务端已更新，正在检查…");
+          maybeReload();
         }
 
         // 首次连接用快照替换；重连时只补进缺失的部分。
@@ -619,14 +721,24 @@ export default function App() {
         socket.close();
       }
     };
-  }, [sessionID]);
+  }, [maybeReload, sessionID]);
 
   // 粘贴图片：读取剪贴板里的文件 → 上传 → 再发一条 image 消息
   const uploadAndSend = async (file: File) => {
     const socket = wsRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
+    if (reloadTimerRef.current) {
+      clearTimeout(reloadTimerRef.current);
+      reloadTimerRef.current = null;
+    }
+
+    uploadingRef.current = true;
     setUploading(true);
+
+    if (pendingReloadRef.current) {
+      setUpdateNotice("服务端已更新，上传完成后自动刷新…");
+    }
 
     try {
       const form = new FormData();
@@ -654,7 +766,9 @@ export default function App() {
       setRateNotice("上传失败，请重试");
       window.setTimeout(() => setRateNotice(""), 2500);
     } finally {
+      uploadingRef.current = false;
       setUploading(false);
+      maybeReload();
     }
   };
 
@@ -674,6 +788,12 @@ export default function App() {
 
     // 立即解除输入状态
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    if (reloadTimerRef.current) {
+      clearTimeout(reloadTimerRef.current);
+      reloadTimerRef.current = null;
+    }
+
     broadcastTyping(false);
 
     // sender/clientId/time are stamped by the server from the session cookie.
@@ -684,6 +804,17 @@ export default function App() {
 
     wsRef.current.send(JSON.stringify(payload));
     setInput("");
+    inputRef.current = "";
+
+    try {
+      sessionStorage.removeItem(DRAFT_KEY);
+    } catch {
+      // ignore
+    }
+
+    // 如果服务端已经发过新版本，发完这条就刷新；消息已经进入 socket 队列。
+    maybeReload();
+
     triggerFx(); // 触发波普拟声词动效
   };
 
@@ -790,6 +921,13 @@ export default function App() {
             {...stylex.props(styles.lightbox)}
           >
             <img src={zoomed} alt="放大查看" {...stylex.props(styles.lightboxImage)} />
+          </div>
+        )}
+
+        {/* 服务端新版本提示：空闲时自动刷新 */}
+        {updateNotice && (
+          <div role="status" aria-live="polite" {...stylex.props(styles.updateBanner)}>
+            {updateNotice}
           </div>
         )}
 

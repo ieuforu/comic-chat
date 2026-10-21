@@ -47,6 +47,19 @@ DEPLOY_HOST=root@your-server ./deploy.sh
 脚本会构建前端、交叉编译 Linux 二进制（`CGO_ENABLED=0`，静态链接）、上传并重启
 systemd 单元。服务器地址、部署路径、单元名都通过环境变量传入，仓库里不保存任何主机信息。
 
+### 部署后前端自动更新
+
+二进制启动时会遍历嵌入的 `web/dist` 计算 buildId，注入 `index.html` 的
+`<meta name="app-build">`，并随 WebSocket `snapshot` 下发。已打开的页面在重连时比较
+两个 id：不一致就进入更新流程——输入框为空且没有上传时约 1 秒后自动刷新；有草稿则等
+发送/清空后刷新，草稿存在 `sessionStorage`，刷新后恢复。
+
+`index.html` 返回 `Cache-Control: no-store`，`/assets/*`（Vite 带 hash）返回
+`immutable`，避免刷新后仍拿到旧 shell，或新旧 chunk 混用。
+
+> 首次上线这个机制前已经打开的页面没有 `app-build` meta，需要手动刷新一次；之后部署
+> 都会自动处理。
+
 ## 身份
 
 身份完全由服务端决定，客户端只能"被分配"：
@@ -104,7 +117,7 @@ WebSocket `/ws`，单一 JSON 事件契约：
 | type | 方向 | 说明 |
 |---|---|---|
 | `chat` | C→S→C | 文本消息，服务端分配递增 `seq` 并保留最近 50 条 |
-| `snapshot` | S→C | 连接建立时下发历史、人数、连接数、最新 `seq`；带 `?since=` 时只下发缺失部分，`truncated` 表示已被淘汰 |
+| `snapshot` | S→C | 连接建立时下发历史、人数、连接数、最新 `seq`、前端 `buildId`；带 `?since=` 时只下发缺失部分，`truncated` 表示已被淘汰 |
 | `presence` | S→C | 人数 / 连接数变化 |
 | `typing` | C→S→C | 输入状态，不进入历史 |
 | `profile` | S→C | 运营者改了昵称，携带 `clientId`（会话前缀）与新的显示名 |

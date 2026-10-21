@@ -72,6 +72,9 @@ type EventMessage struct {
 	// Seq is the newest chat sequence number known to the server; a client stores
 	// it and asks for `?since=<seq>` when it reconnects.
 	Seq uint64 `json:"seq,omitempty"`
+	// BuildID identifies the embedded frontend this process is serving. A client
+	// compares it with the id in its own index.html and reloads when they differ.
+	BuildID string `json:"buildId,omitempty"`
 	// Truncated tells a reconnecting client that messages after its `since` were
 	// already dropped from history, so a gap is expected.
 	Truncated bool `json:"truncated,omitempty"`
@@ -131,6 +134,9 @@ type Hub struct {
 	// rateCfg holds the RateConfig so tests and the debug endpoint can read it
 	// without racing the Run goroutine.
 	rateCfg atomic.Value
+	// buildID is the embedded frontend version, read by snapshots. Atomic because
+	// tests set it after Run has started and a deploy never needs to touch it live.
+	buildID atomic.Value
 	// rateLimited counts chats that exceeded the bucket (dropped in enforce mode,
 	// only counted in log mode).
 	rateLimited atomic.Int64
@@ -185,6 +191,21 @@ func (h *Hub) Restore(history []EventMessage, lastSeq uint64) {
 // SetHistorySink attaches persistence. Call it before Run.
 func (h *Hub) SetHistorySink(sink HistorySink) {
 	h.sink = sink
+}
+
+// SetBuildID records the frontend version served by this process. Safe to call at
+// any time; snapshots pick up the latest value.
+func (h *Hub) SetBuildID(id string) {
+	h.buildID.Store(id)
+}
+
+// BuildID returns the current frontend version (empty when unset).
+func (h *Hub) BuildID() string {
+	if id, ok := h.buildID.Load().(string); ok {
+		return id
+	}
+
+	return ""
 }
 
 // ConnectionCount and UserCount are safe to call from any goroutine.
@@ -335,6 +356,7 @@ func (h *Hub) Run() {
 				Online:      h.onlineUsersLocked(),
 				Connections: len(h.clients),
 				Seq:         h.seq,
+				BuildID:     h.BuildID(),
 				Truncated:   truncated,
 				Me:          &profile,
 			}
