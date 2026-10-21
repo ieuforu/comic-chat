@@ -633,24 +633,28 @@ export default function App() {
     if (pending) {
       pendingPrependRef.current = null;
 
-      const keepViewport = () => {
-        if (scrollRef.current !== el) return;
+      // 用户刚发送消息或点了“回到底部”时，发送优先于旧消息前插的锚定；
+      // 否则保持当前视口，避免加载历史把页面顶飞。
+      if (!stickToBottomRef.current) {
+        const keepViewport = () => {
+          if (scrollRef.current !== el) return;
 
-        if (pending.anchorSeq) {
-          const anchor = el.querySelector<HTMLElement>(`[data-seq="${pending.anchorSeq}"]`);
-          if (anchor) {
-            el.scrollTop += anchor.getBoundingClientRect().top - pending.anchorTop;
-            return;
+          if (pending.anchorSeq) {
+            const anchor = el.querySelector<HTMLElement>(`[data-seq="${pending.anchorSeq}"]`);
+            if (anchor) {
+              el.scrollTop += anchor.getBoundingClientRect().top - pending.anchorTop;
+              return;
+            }
           }
-        }
 
-        // 锚点不可用时退回滚动高度差；比不调整好。
-        el.scrollTop = el.scrollHeight - pending.scrollHeight + pending.scrollTop;
-      };
+          // 锚点不可用时退回滚动高度差；比不调整好。
+          el.scrollTop = el.scrollHeight - pending.scrollHeight + pending.scrollTop;
+        };
 
-      keepViewport();
-      requestAnimationFrame(keepViewport);
-      return;
+        keepViewport();
+        requestAnimationFrame(keepViewport);
+        return;
+      }
     }
 
     const scrollToEnd = () => {
@@ -813,7 +817,21 @@ export default function App() {
           setMessages(history);
           setHasMore(history.length >= SNAPSHOT_HISTORY || payload.truncated === true);
         } else {
+          const previousLastSeq = lastSeqRef.current;
           setMessages((prev) => mergeBySeq(prev, history));
+
+          // 断线期间漏掉的消息也要计入“X 条新消息”，而不是只算实时消息。
+          if (!stickToBottomRef.current) {
+            const missed = history.filter(
+              (message) =>
+                (message.type === "chat" || message.type === "image") &&
+                typeof message.seq === "number" &&
+                message.seq > previousLastSeq &&
+                message.clientId !== sessionID,
+            ).length;
+
+            if (missed > 0) setNewMessages((count) => count + missed);
+          }
         }
 
         if (payload.truncated) {
