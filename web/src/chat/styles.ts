@@ -14,17 +14,112 @@ export const pulseAnim = stylex.keyframes({
   "100%": { opacity: 0.6 },
 });
 
+const floatAnim = stylex.keyframes({
+  "0%, 100%": { transform: "translateY(0) rotate(var(--rot))", opacity: 0.1 },
+  "50%": { transform: "translateY(-26px) rotate(calc(var(--rot) + 4deg))", opacity: 0.18 },
+});
+
+const spinSlowAnim = stylex.keyframes({
+  from: { transform: "rotate(0deg)" },
+  to: { transform: "rotate(360deg)" },
+});
+
+const twinkleAnim = stylex.keyframes({
+  "0%, 100%": { opacity: 0.25, transform: "scale(0.75)" },
+  "50%": { opacity: 0.8, transform: "scale(1.2)" },
+});
+
+const panelInAnim = stylex.keyframes({
+  from: { opacity: 0 },
+  to: { opacity: 1 },
+});
+
 export const styles = stylex.create({
   comicPage: {
-    maxWidth: 680,
-    margin: "32px auto",
-    padding: "0 16px",
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "24px 16px",
+    boxSizing: "border-box",
+    position: "relative",
+    overflow: "hidden",
     fontFamily:
       '"Impact", "Arial Black", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
+  decorLayer: {
+    position: "absolute",
+    inset: 0,
+    overflow: "hidden",
+    pointerEvents: "none",
+    zIndex: 0,
+  },
+  halftone: {
+    position: "absolute",
+    inset: "-25%",
+    backgroundImage: "radial-gradient(#000000 1.4px, transparent 1.5px)",
+    backgroundSize: "18px 18px",
+    opacity: 0.1,
+    animationName: spinSlowAnim,
+    animationDuration: "120s",
+    animationTimingFunction: "linear",
+    animationIterationCount: "infinite",
+  },
+  speedBurst: {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: 1100,
+    height: 1100,
+    marginLeft: -550,
+    marginTop: -550,
+    backgroundImage:
+      "repeating-conic-gradient(from 0deg, rgba(0, 0, 0, 0.08) 0deg 2deg, transparent 2deg 14deg)",
+    borderRadius: "50%",
+    opacity: 0.55,
+    animationName: spinSlowAnim,
+    animationDuration: "90s",
+    animationTimingFunction: "linear",
+    animationIterationCount: "infinite",
+  },
+  decorWord: {
+    position: "absolute",
+    fontFamily: '"Impact", "Arial Black", sans-serif',
+    fontSize: 64,
+    fontWeight: "bold",
+    letterSpacing: "0.05em",
+    whiteSpace: "nowrap",
+    opacity: 0.12,
+    animationName: floatAnim,
+    animationDuration: "11s",
+    animationTimingFunction: "ease-in-out",
+    animationIterationCount: "infinite",
+  },
+  wordOne: { top: "9%", left: "3%", color: "#ef4444" },
+  wordTwo: { top: "18%", right: "4%", color: "#a855f7" },
+  wordThree: { bottom: "10%", left: "5%", color: "#0284c7" },
+  wordFour: { bottom: "18%", right: "6%", color: "#eab308" },
+  spark: {
+    position: "absolute",
+    fontFamily: '"Impact", "Arial Black", sans-serif',
+    fontSize: 30,
+    color: "#eab308",
+    animationName: twinkleAnim,
+    animationDuration: "2.4s",
+    animationTimingFunction: "ease-in-out",
+    animationIterationCount: "infinite",
+  },
+  sparkOne: { top: "12%", right: "18%" },
+  sparkTwo: { bottom: "14%", right: "22%", animationDelay: "0.8s" },
+  sparkThree: { top: "42%", left: "2%", animationDelay: "1.2s" },
   comicPanel: {
+    width: "100%",
+    maxWidth: 680,
+    minWidth: 0,
     border: "3px solid #000000",
     backgroundColor: "#ffffff",
+    backgroundImage: "radial-gradient(rgba(0, 0, 0, 0.055) 1px, transparent 1.1px)",
+    backgroundSize: "14px 14px",
     boxShadow: "6px 6px 0px #000000",
     padding: 24,
     borderRadius: 2,
@@ -34,11 +129,17 @@ export const styles = stylex.create({
     boxSizing: "border-box",
     position: "relative",
     overflow: "hidden",
+    zIndex: 1,
+    animationName: panelInAnim,
+    animationDuration: "0.35s",
+    animationTimingFunction: "ease-out",
   },
   panelHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
+    minWidth: 0,
     borderBottom: "3px solid #000000",
     paddingBottom: 14,
     marginBottom: 16,
@@ -72,6 +173,7 @@ export const styles = stylex.create({
   presenceBadge: {
     display: "flex",
     alignItems: "center",
+    flexShrink: 0,
     gap: 8,
     border: "2px solid #000000",
     padding: "4px 10px",
@@ -244,6 +346,7 @@ export const styles = stylex.create({
   inputForm: {
     display: "flex",
     gap: 8,
+    minWidth: 0,
   },
   bubbleImage: {
     padding: 4,
@@ -274,6 +377,7 @@ export const styles = stylex.create({
   },
   comicInput: {
     flex: 1,
+    minWidth: 0,
     height: 42,
     padding: "0 12px",
     border: "3px solid #000000",

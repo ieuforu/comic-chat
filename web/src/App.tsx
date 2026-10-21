@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import * as stylex from "@stylexjs/stylex";
 
 import { Composer } from "./chat/components/Composer";
+import { Decorations } from "./chat/components/Decorations";
 import { FxOverlay } from "./chat/components/FxOverlay";
 import { JumpButton } from "./chat/components/JumpButton";
 import { Lightbox } from "./chat/components/Lightbox";
@@ -195,6 +196,8 @@ export default function App() {
 
   return (
     <div {...stylex.props(styles.comicPage)}>
+      <Decorations />
+
       <div {...stylex.props(styles.comicPanel)}>
         <PanelHeader
           buildId={LOADED_BUILD_ID}
