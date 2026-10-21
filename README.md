@@ -17,6 +17,10 @@ internal/chat/          聊天领域逻辑，外部无法 import
   roles.go                角色池（服务端唯一来源）
 cmd/loadtest/           压测器（独立可执行）
 web/                    React 19 + StyleX，构建到 web/dist
+  src/App.tsx             容器：输入 / 发送 / 上传 / 页面组合
+  src/chat/components/    PanelHeader、MessageStream、MessageRow、Composer 等展示组件
+  src/chat/hooks/         useChatSocket、useChatScroll、useHistoryPagination、useAutoReload、useComicFx
+  src/chat/               types / constants / messages / theme / styles
 Makefile                make check / build / run / loadtest
 deploy.sh               构建并部署（服务器地址从环境变量读取）
 ```
