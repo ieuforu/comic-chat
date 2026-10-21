@@ -1,475 +1,39 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as stylex from "@stylexjs/stylex";
 
-interface EventMessage {
-  type: "chat" | "image" | "snapshot" | "presence" | "typing" | "notice" | "profile";
-  clientId?: string;
-  sender?: string;
-  content?: string;
-  time?: string;
-  history?: EventMessage[];
-  online?: number;
-  isTyping?: boolean;
-  seq?: number;
-  truncated?: boolean;
-  buildId?: string;
-  connections?: number;
-  notice?: string;
-  name?: string;
-  me?: Profile;
-}
-
-interface Profile {
-  sessionId: string;
-  name: string;
-  emoji: string;
-}
-
-interface HistoryResponse {
-  messages?: EventMessage[];
-  hasMore?: boolean;
-}
-
-interface EffectItem {
-  id: string;
-  text: string;
-  rotation: number;
-}
-
-
-const SFX_WORDS = ["POW!", "BOOM!", "BAM!", "KAPOW!", "WHAM!", "ZAP!"];
-
-const DRAFT_KEY = "comic:draft";
-
-// 页面真正加载到的前端版本。旧页面会一直保留旧值，直到它被 reload。
-const LOADED_BUILD_ID =
-  typeof document === "undefined"
-    ? ""
-    : (document.querySelector<HTMLMetaElement>('meta[name="app-build"]')?.content ?? "");
-
-// 刷新/部署后恢复未发送的草稿；sessionStorage 按标签页隔离。
-const readDraft = (): string => {
-  if (typeof sessionStorage === "undefined") return "";
-
-  try {
-    return sessionStorage.getItem(DRAFT_KEY) ?? "";
-  } catch {
-    return "";
-  }
-};
-
-// 漫画拟声词爆发动画
-const burstAnim = stylex.keyframes({
-  "0%": { transform: "scale(0.2) rotate(var(--rot))", opacity: 0 },
-  "35%": { transform: "scale(1.3) rotate(calc(var(--rot) * -0.5))", opacity: 1 },
-  "65%": { transform: "scale(1.05) rotate(var(--rot))", opacity: 1 },
-  "100%": { transform: "scale(0.8) translateY(-40px) rotate(calc(var(--rot) * 1.5))", opacity: 0 },
-});
-
-const pulseAnim = stylex.keyframes({
-  "0%": { opacity: 0.6 },
-  "50%": { opacity: 1 },
-  "100%": { opacity: 0.6 },
-});
-
-const themeStyles = stylex.create({
-  bubble0: { backgroundColor: "#fef08a", color: "#000", boxShadow: "4px 4px 0px #ca8a04" },
-  badge0: { backgroundColor: "#eab308", color: "#000" },
-  bubble1: { backgroundColor: "#f3e8ff", color: "#000", boxShadow: "4px 4px 0px #9333ea" },
-  badge1: { backgroundColor: "#a855f7", color: "#fff" },
-  bubble2: { backgroundColor: "#ffe4e6", color: "#000", boxShadow: "4px 4px 0px #e11d48" },
-  badge2: { backgroundColor: "#f43f5e", color: "#fff" },
-  bubble3: { backgroundColor: "#e0f2fe", color: "#000", boxShadow: "4px 4px 0px #0284c7" },
-  badge3: { backgroundColor: "#0284c7", color: "#fff" },
-  bubble4: { backgroundColor: "#dcfce7", color: "#000", boxShadow: "4px 4px 0px #16a34a" },
-  badge4: { backgroundColor: "#22c55e", color: "#000" },
-  bubble5: { backgroundColor: "#ffedd5", color: "#000", boxShadow: "4px 4px 0px #ea580c" },
-  badge5: { backgroundColor: "#f97316", color: "#fff" },
-  bubble6: { backgroundColor: "#fce7f3", color: "#000", boxShadow: "4px 4px 0px #db2777" },
-  badge6: { backgroundColor: "#ec4899", color: "#fff" },
-  bubble7: { backgroundColor: "#f1f5f9", color: "#000", boxShadow: "4px 4px 0px #475569" },
-  badge7: { backgroundColor: "#64748b", color: "#fff" },
-  bubble8: { backgroundColor: "#ccfbf1", color: "#000", boxShadow: "4px 4px 0px #0d9488" },
-  badge8: { backgroundColor: "#14b8a6", color: "#000" },
-  bubble9: { backgroundColor: "#e0e7ff", color: "#000", boxShadow: "4px 4px 0px #4f46e5" },
-  badge9: { backgroundColor: "#6366f1", color: "#fff" },
-});
-
-const getThemeBubble = (idx: number) => {
-  const map = [
-    themeStyles.bubble0,
-    themeStyles.bubble1,
-    themeStyles.bubble2,
-    themeStyles.bubble3,
-    themeStyles.bubble4,
-    themeStyles.bubble5,
-    themeStyles.bubble6,
-    themeStyles.bubble7,
-    themeStyles.bubble8,
-    themeStyles.bubble9,
-  ];
-  return map[idx % 10];
-};
-
-const getThemeBadge = (idx: number) => {
-  const map = [
-    themeStyles.badge0,
-    themeStyles.badge1,
-    themeStyles.badge2,
-    themeStyles.badge3,
-    themeStyles.badge4,
-    themeStyles.badge5,
-    themeStyles.badge6,
-    themeStyles.badge7,
-    themeStyles.badge8,
-    themeStyles.badge9,
-  ];
-  return map[idx % 10];
-};
-
-const getHeroIndex = (str: string = "") => {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash) % 10;
-};
-
-const SNAPSHOT_HISTORY = 50;
-const HISTORY_PAGE_SIZE = 50;
-const SCROLL_NEAR_BOTTOM = 80;
-// 最新这些消息始终真实渲染：它们的真实高度决定底部位置。更早的消息才做
-// content-visibility 虚拟化，避免 intrinsic-size 估算让最新气泡被截掉。
-const ALWAYS_RENDER_RECENT = 20;
-
-// 旧消息页是升序的，直接按 seq 合并并排序，避免依赖到达顺序。
-const mergeOlder = (prev: EventMessage[], older: EventMessage[]): EventMessage[] => {
-  const bySeq = new Map<number, EventMessage>();
-
-  for (const msg of [...older, ...prev]) {
-    if (typeof msg.seq === "number") bySeq.set(msg.seq, msg);
-  }
-
-  return [...bySeq.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
-};
-
-const styles = stylex.create({
-  comicPage: {
-    maxWidth: 680,
-    margin: "32px auto",
-    padding: "0 16px",
-    fontFamily:
-      '"Impact", "Arial Black", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-  },
-  comicPanel: {
-    border: "3px solid #000000",
-    backgroundColor: "#ffffff",
-    boxShadow: "6px 6px 0px #000000",
-    padding: 24,
-    borderRadius: 2,
-    display: "flex",
-    flexDirection: "column",
-    height: "84vh",
-    boxSizing: "border-box",
-    position: "relative",
-    overflow: "hidden",
-  },
-  panelHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottom: "3px solid #000000",
-    paddingBottom: 14,
-    marginBottom: 16,
-    flexShrink: 0,
-  },
-  titleBlock: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-start",
-    gap: 5,
-    minWidth: 0,
-  },
-  comicTitle: {
-    margin: 0,
-    fontSize: 22,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-  },
-  buildBadge: {
-    fontFamily: "monospace",
-    fontSize: 10,
-    fontWeight: "bold",
-    letterSpacing: "0.04em",
-    padding: "2px 8px",
-    border: "2px solid #000000",
-    backgroundColor: "#000000",
-    color: "#fef08a",
-    boxShadow: "2px 2px 0px #eab308",
-    whiteSpace: "nowrap",
-  },
-  presenceBadge: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    border: "2px solid #000000",
-    padding: "4px 10px",
-    boxShadow: "3px 3px 0px #000000",
-    fontSize: 12,
-    backgroundColor: "#fef08a",
-  },
-  chatStream: {
-    listStyle: "none",
-    padding: "0 8px 12px 0",
-    margin: 0,
-    flex: 1,
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-  },
-  bubbleRow: {
-    display: "flex",
-    flexDirection: "column",
-    position: "relative",
-  },
-  bubbleRowVirtual: {
-    // 只对较旧的消息启用：离屏跳过渲染，同时保留 DOM 供 Ctrl+F 等使用。
-    contentVisibility: "auto",
-    containIntrinsicSize: "auto 96px",
-  },
-  bubbleRowMe: {
-    alignItems: "flex-end",
-  },
-  bubbleRowOther: {
-    alignItems: "flex-start",
-  },
-  metaRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 6,
-  },
-  speakerBadge: {
-    fontSize: 11,
-    fontFamily: "monospace",
-    fontWeight: "bold",
-    padding: "2px 8px",
-    border: "2px solid #000000",
-    borderRadius: 2,
-    boxShadow: "2px 2px 0px #000000",
-  },
-  timeLabel: {
-    fontSize: 10,
-    color: "#71717a",
-    fontFamily: "monospace",
-  },
-  bubbleBox: {
-    position: "relative",
-    maxWidth: "75%",
-    width: "fit-content",
-    padding: "10px 18px",
-    border: "3px solid #000000",
-    borderRadius: 16,
-    fontSize: 15,
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    fontWeight: 600,
-    lineHeight: 1.4,
-    wordBreak: "break-word",
-  },
-  bubbleMe: {
-    backgroundColor: "#000000",
-    color: "#ffffff",
-    boxShadow: "4px 4px 0px #eab308",
-  },
-  badgeMe: {
-    backgroundColor: "#000000",
-    color: "#ffffff",
-  },
-  tailMe: {
-    position: "absolute",
-    right: 14,
-    bottom: -9,
-    width: 0,
-    height: 0,
-    borderLeft: "9px solid transparent",
-    borderRight: "0px solid transparent",
-    borderTop: "9px solid #000000",
-  },
-  tailOther: {
-    position: "absolute",
-    left: 14,
-    bottom: -9,
-    width: 0,
-    height: 0,
-    borderRight: "9px solid transparent",
-    borderLeft: "0px solid transparent",
-    borderTop: "9px solid #000000",
-  },
-  // 输入状态条
-  typingBar: {
-    minHeight: 24,
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    fontSize: 12,
-    fontFamily: "monospace",
-    fontWeight: "bold",
-    color: "#52525b",
-    padding: "0 4px",
-    marginTop: 4,
-    animationName: pulseAnim,
-    animationDuration: "1.2s",
-    animationIterationCount: "infinite",
-  },
-  updateBanner: {
-    alignSelf: "center",
-    backgroundColor: "#fef08a",
-    color: "#000000",
-    border: "3px solid #000000",
-    boxShadow: "3px 3px 0px #000000",
-    padding: "4px 12px",
-    marginBottom: 4,
-    fontSize: 12,
-    fontFamily: "monospace",
-    fontWeight: "bold",
-    flexShrink: 0,
-  },
-  loadOlderRow: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 28,
-    flexShrink: 0,
-  },
-  loadOlderButton: {
-    border: "2px dashed #000000",
-    backgroundColor: "#fef08a",
-    color: "#000000",
-    padding: "3px 10px",
-    fontFamily: "monospace",
-    fontSize: 11,
-    fontWeight: "bold",
-    cursor: "pointer",
-  },
-  loadOlderText: {
-    fontFamily: "monospace",
-    fontSize: 11,
-    color: "#71717a",
-  },
-  jumpButton: {
-    position: "absolute",
-    right: 18,
-    bottom: 96,
-    zIndex: 20,
-    border: "3px solid #000000",
-    borderRadius: 999,
-    backgroundColor: "#000000",
-    color: "#ffffff",
-    padding: "6px 14px",
-    fontFamily: "monospace",
-    fontSize: 12,
-    fontWeight: "bold",
-    cursor: "pointer",
-    boxShadow: "3px 3px 0px #eab308",
-  },
-  inputAreaWrapper: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    marginTop: 8,
-    flexShrink: 0,
-  },
-  inputForm: {
-    display: "flex",
-    gap: 8,
-  },
-  bubbleImage: {
-    padding: 4,
-  },
-  msgImage: {
-    display: "block",
-    maxWidth: 260,
-    maxHeight: 260,
-    borderRadius: 6,
-    cursor: "zoom-in",
-  },
-  lightbox: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 50,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.82)",
-    cursor: "zoom-out",
-  },
-  lightboxImage: {
-    maxWidth: "92vw",
-    maxHeight: "92vh",
-    border: "4px solid #000000",
-    boxShadow: "8px 8px 0px #000000",
-    backgroundColor: "#ffffff",
-  },
-  comicInput: {
-    flex: 1,
-    height: 42,
-    padding: "0 12px",
-    border: "3px solid #000000",
-    borderRadius: 2,
-    fontSize: 14,
-    fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif",
-    fontWeight: "bold",
-    outline: "none",
-    boxShadow: "3px 3px 0px #000000",
-  },
-  comicButton: {
-    height: 42,
-    padding: "0 24px",
-    border: "3px solid #000000",
-    backgroundColor: "#ef4444",
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "bold",
-    cursor: "pointer",
-    boxShadow: "3px 3px 0px #000000",
-    flexShrink: 0,
-  },
-  comicButtonDisabled: {
-    backgroundColor: "#d4d4d8",
-    color: "#71717a",
-    cursor: "not-allowed",
-  },
-  emptyNotice: {
-    textAlign: "center",
-    fontSize: 13,
-    color: "#a1a1aa",
-    margin: "auto",
-    border: "2px dashed #000000",
-    padding: "24px 32px",
-    borderRadius: 4,
-  },
-  // 爆发拟声词容器
-  fxBadge: {
-    position: "absolute",
-    right: 28,
-    bottom: 50,
-    backgroundColor: "#fef08a",
-    color: "#ef4444",
-    border: "3px solid #000000",
-    padding: "6px 14px",
-    fontSize: 26,
-    fontFamily: '"Impact", "Arial Black", sans-serif',
-    letterSpacing: "0.08em",
-    boxShadow: "4px 4px 0px #000000",
-    pointerEvents: "none",
-    zIndex: 10,
-    animationName: burstAnim,
-    animationDuration: "0.85s",
-    animationFillMode: "forwards",
-  },
-});
+import { Composer } from "./chat/components/Composer";
+import { FxOverlay } from "./chat/components/FxOverlay";
+import { JumpButton } from "./chat/components/JumpButton";
+import { Lightbox } from "./chat/components/Lightbox";
+import { MessageStream } from "./chat/components/MessageStream";
+import { PanelHeader } from "./chat/components/PanelHeader";
+import {
+  DRAFT_KEY,
+  FX_DURATION_MS,
+  HISTORY_PAGE_SIZE,
+  LOADED_BUILD_ID,
+  PROGRAMMATIC_SCROLL_TIMEOUT_MS,
+  RATE_NOTICE_MS,
+  RELOAD_DELAY_MS,
+  SCROLL_NEAR_BOTTOM,
+  SFX_WORDS,
+  TYPING_DEBOUNCE_MS,
+  readDraft,
+} from "./chat/constants";
+import {
+  countMissedMessages,
+  mergeBySeq,
+  mergeOlder,
+  snapshotHasOlder,
+} from "./chat/messages";
+import { styles } from "./chat/styles";
+import type {
+  EffectItem,
+  EventMessage,
+  HistoryResponse,
+  PrependAnchor,
+  Profile,
+} from "./chat/types";
 
 export default function App() {
   // Identity comes from the server: a httpOnly cookie holds the session, and this
@@ -526,12 +90,7 @@ export default function App() {
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickToBottomRef = useRef(true);
   const initialScrollDoneRef = useRef(false);
-  const pendingPrependRef = useRef<{
-    anchorSeq: string;
-    anchorTop: number;
-    scrollHeight: number;
-    scrollTop: number;
-  } | null>(null);
+  const pendingPrependRef = useRef<PrependAnchor | null>(null);
   const loadingOlderRef = useRef(false);
   const forceBottomRef = useRef(false);
   const programmaticScrollRef = useRef(false);
@@ -573,7 +132,7 @@ export default function App() {
       }
 
       window.location.reload();
-    }, 900);
+    }, RELOAD_DELAY_MS);
   }, []);
 
   // 触发本地拟声词爆发
@@ -585,7 +144,7 @@ export default function App() {
 
     setTimeout(() => {
       setEffects((prev) => prev.filter((item) => item.id !== id));
-    }, 850);
+    }, FX_DURATION_MS);
   };
 
   const broadcastTyping = (isTyping: boolean) => {
@@ -622,7 +181,7 @@ export default function App() {
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       broadcastTyping(false);
-    }, 1800);
+    }, TYPING_DEBOUNCE_MS);
 
     // 输入被清空（例如草稿删掉）时，如果服务端有新版本就立即刷新。
     maybeReload();
@@ -649,7 +208,7 @@ export default function App() {
     programmaticScrollTimerRef.current = setTimeout(() => {
       programmaticScrollTimerRef.current = null;
       programmaticScrollRef.current = false;
-    }, 800);
+    }, PROGRAMMATIC_SCROLL_TIMEOUT_MS);
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -842,22 +401,6 @@ export default function App() {
     let stableTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
 
-    const mergeBySeq = (prev: EventMessage[], incoming: EventMessage[]): EventMessage[] => {
-      const seen = new Set<number>();
-      const merged: EventMessage[] = [];
-
-      for (const msg of [...prev, ...incoming]) {
-        // typing 事件没有 seq，按原样保留；聊天消息按 seq 去重。
-        if ((msg.type === "chat" || msg.type === "image") && typeof msg.seq === "number") {
-          if (seen.has(msg.seq)) continue;
-          seen.add(msg.seq);
-        }
-        merged.push(msg);
-      }
-
-      return merged;
-    };
-
     const handlePayload = (raw: string) => {
       let payload: EventMessage;
 
@@ -901,20 +444,14 @@ export default function App() {
         // 首次快照的 50 条是服务端内存上限，可能还有更早的库内历史。
         if (firstSnapshot) {
           setMessages(history);
-          setHasMore(history.length >= SNAPSHOT_HISTORY || payload.truncated === true);
+          setHasMore(snapshotHasOlder(history.length, payload.truncated));
         } else {
           const previousLastSeq = lastSeqRef.current;
           setMessages((prev) => mergeBySeq(prev, history));
 
           // 断线期间漏掉的消息也要计入“X 条新消息”，而不是只算实时消息。
           if (!stickToBottomRef.current) {
-            const missed = history.filter(
-              (message) =>
-                (message.type === "chat" || message.type === "image") &&
-                typeof message.seq === "number" &&
-                message.seq > previousLastSeq &&
-                message.clientId !== sessionID,
-            ).length;
+            const missed = countMissedMessages(history, previousLastSeq, sessionID);
 
             if (missed > 0) setNewMessages((count) => count + missed);
           }
@@ -966,7 +503,7 @@ export default function App() {
       } else if (payload.type === "notice") {
         // 服务端限流时的提示，2 秒后自动消失
         setRateNotice(payload.notice ?? "");
-        window.setTimeout(() => setRateNotice(""), 2500);
+        window.setTimeout(() => setRateNotice(""), RATE_NOTICE_MS);
       } else if (payload.type === "chat" || payload.type === "image") {
         // 补发与实时消息可能重叠，按 seq 丢弃已见过的。
         if (typeof payload.seq === "number" && payload.seq <= lastSeqRef.current) return;
@@ -1092,7 +629,7 @@ export default function App() {
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
         setRateNotice(detail.error ?? `上传失败（${res.status}）`);
-        window.setTimeout(() => setRateNotice(""), 2500);
+        window.setTimeout(() => setRateNotice(""), RATE_NOTICE_MS);
 
         return;
       }
@@ -1103,7 +640,7 @@ export default function App() {
       socket.send(JSON.stringify({ type: "image", content: media.id }));
     } catch {
       setRateNotice("上传失败，请重试");
-      window.setTimeout(() => setRateNotice(""), 2500);
+      window.setTimeout(() => setRateNotice(""), RATE_NOTICE_MS);
     } finally {
       uploadingRef.current = false;
       setUploading(false);
@@ -1164,203 +701,53 @@ export default function App() {
 
   // 格式化输入中提示文字
   const typingUsers = Object.values(typingMap);
-  const typingText =
-    typingUsers.length === 1
-      ? `${typingUsers[0]} 正在构思对白...`
-      : typingUsers.length > 1
-        ? `${typingUsers.join(", ")} 正在激烈辩论...`
-        : "";
 
   return (
     <div {...stylex.props(styles.comicPage)}>
       <div {...stylex.props(styles.comicPanel)}>
-        {/* 标题栏 */}
-        <div {...stylex.props(styles.panelHeader)}>
-          <div {...stylex.props(styles.titleBlock)}>
-            <h1 {...stylex.props(styles.comicTitle)}>PANEL // DIALOGUE</h1>
-            <span {...stylex.props(styles.buildBadge)} title="当前页面加载的前端 build">
-              BUILD {LOADED_BUILD_ID || "dev"}
-            </span>
-          </div>
-          <div {...stylex.props(styles.presenceBadge)}>
-            <span>⚡</span>
-            <span>{connected ? `ONLINE: ${onlineCount}` : retrying ? "重连中…" : "OFFLINE"}</span>
-          </div>
-        </div>
+        <PanelHeader
+          buildId={LOADED_BUILD_ID}
+          connected={connected}
+          retrying={retrying}
+          onlineCount={onlineCount}
+        />
 
-        {/* 消息流 */}
-        <ul
-          ref={scrollRef}
+        <MessageStream
+          messages={messages}
+          selfSessionId={sessionID}
+          scrollRef={scrollRef}
+          sentinelRef={topSentinelRef}
+          hasMore={hasMore}
+          loadingOlder={loadingOlder}
+          olderError={olderError}
+          onLoadOlder={() => void loadOlder()}
           onScroll={handleScroll}
           onWheel={cancelProgrammaticScroll}
           onTouchStart={cancelProgrammaticScroll}
-          {...stylex.props(styles.chatStream)}
-        >
-          {messages.length > 0 &&
-            (hasMore || loadingOlder || olderError || messages.length >= SNAPSHOT_HISTORY) && (
-              <li ref={topSentinelRef} {...stylex.props(styles.loadOlderRow)}>
-                {loadingOlder ? (
-                  <span {...stylex.props(styles.loadOlderText)}>加载更早的消息…</span>
-                ) : olderError ? (
-                  <button
-                    type="button"
-                    onClick={() => void loadOlder()}
-                    {...stylex.props(styles.loadOlderButton)}
-                  >
-                    加载失败，点击重试
-                  </button>
-                ) : hasMore ? (
-                  <button
-                    type="button"
-                    onClick={() => void loadOlder()}
-                    {...stylex.props(styles.loadOlderButton)}
-                  >
-                    加载更早的消息
-                  </button>
-                ) : (
-                  <span {...stylex.props(styles.loadOlderText)}>已经是最早的消息</span>
-                )}
-              </li>
-            )}
+          onZoom={(src) => setZoomed(src)}
+        />
 
-          {messages.length === 0 ? (
-            <li {...stylex.props(styles.emptyNotice)}>NO DIALOGUE YET...</li>
-          ) : (
-            messages.map((item, idx) => {
-              const isMe = item.clientId === user?.sessionId;
-              const themeIdx = getHeroIndex(item.clientId || String(idx));
-              const virtualize = idx < messages.length - ALWAYS_RENDER_RECENT;
+        <JumpButton
+          visible={!atBottom}
+          count={newMessages}
+          onClick={() => scrollToBottom("smooth")}
+        />
 
-              return (
-                <li
-                  key={item.seq ?? idx}
-                  data-seq={item.seq}
-                  {...stylex.props(
-                    styles.bubbleRow,
-                    isMe ? styles.bubbleRowMe : styles.bubbleRowOther,
-                    virtualize && styles.bubbleRowVirtual,
-                  )}
-                >
-                  <div {...stylex.props(styles.metaRow)}>
-                    <span
-                      {...stylex.props(
-                        styles.speakerBadge,
-                        isMe ? styles.badgeMe : getThemeBadge(themeIdx),
-                      )}
-                    >
-                      {isMe ? "YOU" : item.sender || "UNKNOWN"}
-                    </span>
-                    <span {...stylex.props(styles.timeLabel)}>{item.time}</span>
-                  </div>
+        <FxOverlay effects={effects} />
+        <Lightbox src={zoomed} onClose={() => setZoomed(null)} />
 
-                  <div
-                    {...stylex.props(
-                      styles.bubbleBox,
-                      isMe ? styles.bubbleMe : getThemeBubble(themeIdx),
-                      item.type === "image" && styles.bubbleImage,
-                    )}
-                  >
-                    {item.type === "image" ? (
-                      <img
-                        src={`/media/${item.content}`}
-                        alt="图片消息"
-                        loading="lazy"
-                        onClick={() => setZoomed(`/media/${item.content}`)}
-                        onError={(e) => {
-                          // 超过 7 天会被清理，给一个明确提示而不是破图
-                          const target = e.currentTarget;
-                          target.style.display = "none";
-                          target.insertAdjacentText("afterend", "（图片已过期）");
-                        }}
-                        {...stylex.props(styles.msgImage)}
-                      />
-                    ) : (
-                      item.content
-                    )}
-                    <div {...stylex.props(isMe ? styles.tailMe : styles.tailOther)} />
-                  </div>
-                </li>
-              );
-            })
-          )}
-        </ul>
-
-        {!atBottom && (
-          <button
-            type="button"
-            onClick={() => scrollToBottom("smooth")}
-            aria-label="回到底部"
-            {...stylex.props(styles.jumpButton)}
-          >
-            {newMessages > 0 ? `${newMessages} 条新消息 ↓` : "回到底部 ↓"}
-          </button>
-        )}
-
-        {/* 拟声词爆炸动效挂载 */}
-        {effects.map((item) => (
-          <div
-            key={item.id}
-            {...stylex.props(styles.fxBadge)}
-            style={{ "--rot": `${item.rotation}deg` } as React.CSSProperties}
-          >
-            {item.text}
-          </div>
-        ))}
-
-        {/* 点击图片放大查看：点任意处或按 Esc 关闭 */}
-        {zoomed && (
-          <div
-            onClick={() => setZoomed(null)}
-            onKeyDown={(e) => e.key === "Escape" && setZoomed(null)}
-            role="presentation"
-            {...stylex.props(styles.lightbox)}
-          >
-            <img src={zoomed} alt="放大查看" {...stylex.props(styles.lightboxImage)} />
-          </div>
-        )}
-
-        {/* 服务端新版本提示：空闲时自动刷新 */}
-        {updateNotice && (
-          <div role="status" aria-live="polite" {...stylex.props(styles.updateBanner)}>
-            {updateNotice}
-          </div>
-        )}
-
-        {/* 底部输入区 */}
-        <div {...stylex.props(styles.inputAreaWrapper)}>
-          {/* 实时构思状态条 */}
-          <div {...stylex.props(styles.typingBar)}>
-            {uploading ? (
-              <span>📤 正在上传图片…</span>
-            ) : rateNotice ? (
-              <span>⏳ {rateNotice}</span>
-            ) : (
-              typingText && (
-                <>
-                  <span>🗯️</span>
-                  <span>{typingText}</span>
-                </>
-              )
-            )}
-          </div>
-
-          <form onSubmit={sendMessage} {...stylex.props(styles.inputForm)}>
-            <input
-              {...stylex.props(styles.comicInput)}
-              value={input}
-              placeholder={`Say something, ${user ? `${user.emoji} ${user.name}` : "…"}...`}
-              onChange={handleInputChange}
-              onPaste={handlePaste}
-            />
-            <button
-              type="submit"
-              disabled={!connected}
-              {...stylex.props(styles.comicButton, !connected && styles.comicButtonDisabled)}
-            >
-              POW!
-            </button>
-          </form>
-        </div>
+        <Composer
+          input={input}
+          connected={connected}
+          uploading={uploading}
+          rateNotice={rateNotice}
+          updateNotice={updateNotice}
+          typingUsers={typingUsers}
+          user={user}
+          onInputChange={handleInputChange}
+          onPaste={handlePaste}
+          onSubmit={sendMessage}
+        />
       </div>
     </div>
   );
