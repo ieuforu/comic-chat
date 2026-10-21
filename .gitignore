@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+web/node_modules/
+
+# Frontend build output. An empty web/dist/.gitkeep is committed so `go:embed` has
+# something to match in a fresh clone; `make frontend` restores it after vite
+# empties the directory. The real bundle never enters git.
+web/dist/*
+!web/dist/.gitkeep
+# Root-only: a bare `dist/` also matches web/dist and would override the negation
+# above (later rules win), silently re-ignoring the placeholder.
+/dist/
+
+# Go build artifacts — architecture-specific binaries never belong in git, and
+# without -trimpath they embed local checkout paths. `comic` is the Makefile's
+# BINARY; the other names are kept so an older build cannot slip in.
+/comic
+server
+server-linux
+server-darwin
+*.exe
+
+# Logs
+*.log
+logs/
+
+# Runtime state: signing key, the SQLite history and the operator's name overrides.
+.state/
+*.state/
+
+# Environment / local overrides
+.env
+.env.*
+*.local
+
+# Deploy config carries the server address, so ignore every variant of it.
+# The example is the only deploy file that belongs in the repository.
+.deploy.env*
+!.deploy.env.example
+
+# Editor / OS
+.DS_Store
+.idea/
+*.sw?
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
