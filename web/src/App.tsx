@@ -509,10 +509,14 @@ export default function App() {
     scrollTop: number;
   } | null>(null);
   const loadingOlderRef = useRef(false);
+  const forceBottomRef = useRef(false);
+  const programmaticScrollRef = useRef(false);
+  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
       if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      if (programmaticScrollTimerRef.current) clearTimeout(programmaticScrollTimerRef.current);
     };
   }, []);
 
@@ -600,6 +604,30 @@ export default function App() {
     maybeReload();
   };
 
+  const cancelProgrammaticScroll = useCallback(() => {
+    programmaticScrollRef.current = false;
+
+    if (programmaticScrollTimerRef.current) {
+      clearTimeout(programmaticScrollTimerRef.current);
+      programmaticScrollTimerRef.current = null;
+    }
+  }, []);
+
+  const beginProgrammaticScroll = useCallback(() => {
+    programmaticScrollRef.current = true;
+
+    if (programmaticScrollTimerRef.current) {
+      clearTimeout(programmaticScrollTimerRef.current);
+    }
+
+    // Fallback: if the browser does not emit a final scroll event (already at
+    // bottom, animation cancelled), do not leave the guard stuck forever.
+    programmaticScrollTimerRef.current = setTimeout(() => {
+      programmaticScrollTimerRef.current = null;
+      programmaticScrollRef.current = false;
+    }, 800);
+  }, []);
+
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -607,21 +635,37 @@ export default function App() {
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     const bottom = distance < SCROLL_NEAR_BOTTOM;
 
+    // 平滑滚动的中间位置离底部很远，不能因此把 stick 改成 false。
+    if (programmaticScrollRef.current) {
+      if (bottom) {
+        cancelProgrammaticScroll();
+        stickToBottomRef.current = true;
+        setAtBottom(true);
+        setNewMessages(0);
+      }
+
+      return;
+    }
+
     stickToBottomRef.current = bottom;
     setAtBottom(bottom);
 
     if (bottom) setNewMessages(0);
-  }, []);
+  }, [cancelProgrammaticScroll]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    const el = scrollRef.current;
-    if (!el) return;
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      const el = scrollRef.current;
+      if (!el) return;
 
-    el.scrollTo({ top: el.scrollHeight, behavior });
-    stickToBottomRef.current = true;
-    setAtBottom(true);
-    setNewMessages(0);
-  }, []);
+      beginProgrammaticScroll();
+      el.scrollTo({ top: el.scrollHeight, behavior });
+      stickToBottomRef.current = true;
+      setAtBottom(true);
+      setNewMessages(0);
+    },
+    [beginProgrammaticScroll],
+  );
 
   // 只在第一次拿到历史时跳到底部；之后是否跟随由滚动位置决定。
   // 旧消息前插时用 pendingPrependRef 保持视口不动，避免“加载更早”把页面顶飞。
@@ -661,6 +705,17 @@ export default function App() {
       if (scrollRef.current === el) el.scrollTop = el.scrollHeight;
     };
 
+    // 发送消息后等回显真正进入列表，再滚到包含这条消息的新底部。
+    if (forceBottomRef.current) {
+      forceBottomRef.current = false;
+      stickToBottomRef.current = true;
+      setNewMessages(0);
+      setAtBottom(true);
+      beginProgrammaticScroll();
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      return;
+    }
+
     if (!initialScrollDoneRef.current) {
       if (messages.length === 0) return;
 
@@ -675,7 +730,7 @@ export default function App() {
       scrollToEnd();
       requestAnimationFrame(scrollToEnd);
     }
-  }, [messages]);
+  }, [beginProgrammaticScroll, messages]);
 
   const loadOlder = useCallback(async () => {
     if (loadingOlderRef.current || !hasMore) return;
@@ -1065,7 +1120,8 @@ export default function App() {
       // ignore
     }
 
-    // 自己发消息时回到底部；收到别人的消息则只在本来就在底部时跟随。
+    // 自己发消息时回到底部：先给出即时反馈，回显到达后再按新高度校正一次。
+    forceBottomRef.current = true;
     scrollToBottom("smooth");
 
     // 如果服务端已经发过新版本，发完这条就刷新；消息已经进入 socket 队列。
@@ -1096,7 +1152,13 @@ export default function App() {
         </div>
 
         {/* 消息流 */}
-        <ul ref={scrollRef} onScroll={handleScroll} {...stylex.props(styles.chatStream)}>
+        <ul
+          ref={scrollRef}
+          onScroll={handleScroll}
+          onWheel={cancelProgrammaticScroll}
+          onTouchStart={cancelProgrammaticScroll}
+          {...stylex.props(styles.chatStream)}
+        >
           {messages.length > 0 &&
             (hasMore || loadingOlder || olderError || messages.length >= SNAPSHOT_HISTORY) && (
               <li ref={topSentinelRef} {...stylex.props(styles.loadOlderRow)}>
