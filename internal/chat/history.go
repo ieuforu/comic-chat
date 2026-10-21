@@ -38,6 +38,11 @@ type HistoryStore struct {
 const RestoreLimit = maxHistory
 
 const (
+	historyPageDefault = 50
+	historyPageMax     = 100
+)
+
+const (
 	// Batches are small so a message is on disk quickly; the timer bounds how long a
 	// partial batch waits.
 	historyBatchSize  = 32
@@ -160,19 +165,77 @@ func (s *HistoryStore) LoadRecent(limit int) ([]EventMessage, uint64, error) {
 	}
 	defer rows.Close()
 
-	var (
-		reversed []EventMessage
-		maxSeq   uint64
+	reversed, err := readHistoryRows(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var maxSeq uint64
+	if len(reversed) > 0 {
+		maxSeq = reversed[0].Seq
+	}
+
+	return reverseHistory(reversed), maxSeq, nil
+}
+
+// LoadBefore returns the page of messages immediately older than before, in
+// ascending order, plus whether an older page still exists.
+//
+// The hub only keeps maxHistory in memory, so this is what makes older history
+// reachable: the database is the source of truth, and a client pages backwards
+// from the oldest seq it already has.
+func (s *HistoryStore) LoadBefore(before uint64, limit int) ([]EventMessage, bool, error) {
+	if before == 0 {
+		return []EventMessage{}, false, nil
+	}
+
+	if limit <= 0 {
+		limit = historyPageDefault
+	}
+
+	if limit > historyPageMax {
+		limit = historyPageMax
+	}
+
+	// Fetch one extra row to distinguish "exactly the page size" from "there is
+	// another page" without a second COUNT query.
+	rows, err := s.db.Query(
+		`SELECT seq, session_id, sender, content, time, kind
+		 FROM messages WHERE seq < ? ORDER BY seq DESC LIMIT ?`,
+		before, limit+1,
 	)
+	if err != nil {
+		return nil, false, fmt.Errorf("load older history: %w", err)
+	}
+	defer rows.Close()
+
+	reversed, err := readHistoryRows(rows)
+	if err != nil {
+		return nil, false, err
+	}
+
+	hasMore := len(reversed) > limit
+	if hasMore {
+		reversed = reversed[:limit]
+	}
+
+	return reverseHistory(reversed), hasMore, nil
+}
+
+// readHistoryRows scans the newest-first rows used by both LoadRecent and
+// LoadBefore. Callers own rows and must close it.
+func readHistoryRows(rows *sql.Rows) ([]EventMessage, error) {
+	var reversed []EventMessage
 
 	for rows.Next() {
-		var msg EventMessage
-		var seq int64
-
-		var kind string
+		var (
+			msg  EventMessage
+			seq  int64
+			kind string
+		)
 
 		if err := rows.Scan(&seq, &msg.ClientId, &msg.Sender, &msg.Content, &msg.Time, &kind); err != nil {
-			return nil, 0, fmt.Errorf("scan history: %w", err)
+			return nil, fmt.Errorf("scan history: %w", err)
 		}
 
 		msg.Type = kind
@@ -181,19 +244,19 @@ func (s *HistoryStore) LoadRecent(limit int) ([]EventMessage, uint64, error) {
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
-	if len(reversed) > 0 {
-		maxSeq = reversed[0].Seq
-	}
+	return reversed, nil
+}
 
+func reverseHistory(reversed []EventMessage) []EventMessage {
 	out := make([]EventMessage, len(reversed))
 	for i, msg := range reversed {
 		out[len(reversed)-1-i] = msg
 	}
 
-	return out, maxSeq, nil
+	return out
 }
 
 // Append enqueues a message for persistence. It never blocks the caller: when the

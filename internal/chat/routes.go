@@ -17,6 +17,7 @@ type Deps struct {
 	Hub      *Hub
 	Sessions *SessionStore
 	Media    *MediaStore
+	History  *HistoryStore
 	StaticFS fs.FS
 	// IndexHTML is the SPA shell with the build id injected. When nil, Routes reads
 	// index.html from StaticFS (which keeps tests and small embeddings working).
@@ -58,6 +59,7 @@ func Routes(deps Deps) http.Handler {
 	}
 
 	store.routes(mux)
+	historyRoutes(mux, deps.History, store)
 	mediaRoutes(mux, deps.Media, store)
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {

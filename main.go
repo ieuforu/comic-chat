@@ -100,6 +100,7 @@ func main() {
 			Hub:       hub,
 			Sessions:  store,
 			Media:     media,
+			History:   history,
 			StaticFS:  staticFS,
 			IndexHTML: assets.IndexHTML,
 		}),

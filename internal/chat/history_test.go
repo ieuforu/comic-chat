@@ -80,6 +80,80 @@ func TestHistoryPersistsAcrossRestart(t *testing.T) {
 	}
 }
 
+func waitForHistory(t *testing.T, store *HistoryStore, want int) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+
+	for time.Now().Before(deadline) {
+		recent, _, err := store.LoadRecent(want)
+		if err == nil && len(recent) >= want {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("history did not reach %d messages in time", want)
+}
+
+func TestLoadBeforePagesBackwards(t *testing.T) {
+	store, _ := newTestHistory(t, 0)
+	defer store.Close()
+
+	for i := uint64(1); i <= 5; i++ {
+		store.Append(msg(i, "m"))
+	}
+
+	waitForHistory(t, store, 5)
+
+	page, hasMore, err := store.LoadBefore(5, 2)
+	if err != nil {
+		t.Fatalf("LoadBefore: %v", err)
+	}
+
+	if got := []uint64{page[0].Seq, page[1].Seq}; got[0] != 3 || got[1] != 4 {
+		t.Fatalf("first page seqs = %v, want [3 4]", got)
+	}
+
+	if !hasMore {
+		t.Fatal("first page should report more history")
+	}
+
+	page, hasMore, err = store.LoadBefore(3, 2)
+	if err != nil {
+		t.Fatalf("LoadBefore second page: %v", err)
+	}
+
+	if got := []uint64{page[0].Seq, page[1].Seq}; got[0] != 1 || got[1] != 2 {
+		t.Fatalf("second page seqs = %v, want [1 2]", got)
+	}
+
+	if hasMore {
+		t.Fatal("second page should be the oldest")
+	}
+
+	page, hasMore, err = store.LoadBefore(1, 2)
+	if err != nil {
+		t.Fatalf("LoadBefore before first message: %v", err)
+	}
+
+	if len(page) != 0 || hasMore {
+		t.Fatalf("before first message = %d messages, hasMore=%v", len(page), hasMore)
+	}
+
+	// The handler lets LoadBefore clamp oversized limits; the extra row must not
+	// leak into the response.
+	page, hasMore, err = store.LoadBefore(5, 1000)
+	if err != nil {
+		t.Fatalf("LoadBefore huge limit: %v", err)
+	}
+
+	if len(page) != 4 || hasMore {
+		t.Fatalf("huge limit = %d messages, hasMore=%v", len(page), hasMore)
+	}
+}
+
 func TestLoadRecentReturnsNewestInAscendingOrder(t *testing.T) {
 	store, _ := newTestHistory(t, 0)
 	defer store.Close()

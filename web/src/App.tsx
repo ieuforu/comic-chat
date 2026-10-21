@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import * as stylex from "@stylexjs/stylex";
 
 interface EventMessage {
@@ -23,6 +23,11 @@ interface Profile {
   sessionId: string;
   name: string;
   emoji: string;
+}
+
+interface HistoryResponse {
+  messages?: EventMessage[];
+  hasMore?: boolean;
 }
 
 interface EffectItem {
@@ -131,6 +136,21 @@ const getHeroIndex = (str: string = "") => {
   return Math.abs(hash) % 10;
 };
 
+const SNAPSHOT_HISTORY = 50;
+const HISTORY_PAGE_SIZE = 50;
+const SCROLL_NEAR_BOTTOM = 80;
+
+// 旧消息页是升序的，直接按 seq 合并并排序，避免依赖到达顺序。
+const mergeOlder = (prev: EventMessage[], older: EventMessage[]): EventMessage[] => {
+  const bySeq = new Map<number, EventMessage>();
+
+  for (const msg of [...older, ...prev]) {
+    if (typeof msg.seq === "number") bySeq.set(msg.seq, msg);
+  }
+
+  return [...bySeq.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+};
+
 const styles = stylex.create({
   comicPage: {
     maxWidth: 680,
@@ -191,6 +211,9 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     position: "relative",
+    // 浏览器原生虚拟化：离屏消息跳过渲染，但仍保留在 DOM 中供 Ctrl+F 等使用。
+    contentVisibility: "auto",
+    containIntrinsicSize: "auto 96px",
   },
   bubbleRowMe: {
     alignItems: "flex-end",
@@ -288,6 +311,44 @@ const styles = stylex.create({
     fontFamily: "monospace",
     fontWeight: "bold",
     flexShrink: 0,
+  },
+  loadOlderRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 28,
+    flexShrink: 0,
+  },
+  loadOlderButton: {
+    border: "2px dashed #000000",
+    backgroundColor: "#fef08a",
+    color: "#000000",
+    padding: "3px 10px",
+    fontFamily: "monospace",
+    fontSize: 11,
+    fontWeight: "bold",
+    cursor: "pointer",
+  },
+  loadOlderText: {
+    fontFamily: "monospace",
+    fontSize: 11,
+    color: "#71717a",
+  },
+  jumpButton: {
+    position: "absolute",
+    right: 18,
+    bottom: 96,
+    zIndex: 20,
+    border: "3px solid #000000",
+    borderRadius: 999,
+    backgroundColor: "#000000",
+    color: "#ffffff",
+    padding: "6px 14px",
+    fontFamily: "monospace",
+    fontSize: 12,
+    fontWeight: "bold",
+    cursor: "pointer",
+    boxShadow: "3px 3px 0px #eab308",
   },
   inputAreaWrapper: {
     position: "relative",
@@ -416,6 +477,12 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   // 点击图片后全屏查看
   const [zoomed, setZoomed] = useState<string | null>(null);
+  // 历史分页 / 滚动位置
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState(false);
+  const [atBottom, setAtBottom] = useState(true);
+  const [newMessages, setNewMessages] = useState(0);
   // 已收到的最大消息序号：重连时带上它，服务端只补发之后的消息。
   const lastSeqRef = useRef(0);
 
@@ -426,12 +493,22 @@ export default function App() {
   const [effects, setEffects] = useState<EffectItem[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLUListElement | null>(null);
+  const topSentinelRef = useRef<HTMLLIElement | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef(input);
   const uploadingRef = useRef(false);
   const pendingReloadRef = useRef(false);
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stickToBottomRef = useRef(true);
+  const initialScrollDoneRef = useRef(false);
+  const pendingPrependRef = useRef<{
+    anchorSeq: string;
+    anchorTop: number;
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
+  const loadingOlderRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -523,9 +600,145 @@ export default function App() {
     maybeReload();
   };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const bottom = distance < SCROLL_NEAR_BOTTOM;
+
+    stickToBottomRef.current = bottom;
+    setAtBottom(bottom);
+
+    if (bottom) setNewMessages(0);
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    stickToBottomRef.current = true;
+    setAtBottom(true);
+    setNewMessages(0);
+  }, []);
+
+  // 只在第一次拿到历史时跳到底部；之后是否跟随由滚动位置决定。
+  // 旧消息前插时用 pendingPrependRef 保持视口不动，避免“加载更早”把页面顶飞。
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const pending = pendingPrependRef.current;
+    if (pending) {
+      pendingPrependRef.current = null;
+
+      const keepViewport = () => {
+        if (scrollRef.current !== el) return;
+
+        if (pending.anchorSeq) {
+          const anchor = el.querySelector<HTMLElement>(`[data-seq="${pending.anchorSeq}"]`);
+          if (anchor) {
+            el.scrollTop += anchor.getBoundingClientRect().top - pending.anchorTop;
+            return;
+          }
+        }
+
+        // 锚点不可用时退回滚动高度差；比不调整好。
+        el.scrollTop = el.scrollHeight - pending.scrollHeight + pending.scrollTop;
+      };
+
+      keepViewport();
+      requestAnimationFrame(keepViewport);
+      return;
+    }
+
+    const scrollToEnd = () => {
+      if (scrollRef.current === el) el.scrollTop = el.scrollHeight;
+    };
+
+    if (!initialScrollDoneRef.current) {
+      if (messages.length === 0) return;
+
+      initialScrollDoneRef.current = true;
+      stickToBottomRef.current = true;
+      scrollToEnd();
+      requestAnimationFrame(scrollToEnd);
+      return;
+    }
+
+    if (stickToBottomRef.current) {
+      scrollToEnd();
+      requestAnimationFrame(scrollToEnd);
+    }
   }, [messages]);
+
+  const loadOlder = useCallback(async () => {
+    if (loadingOlderRef.current || !hasMore) return;
+
+    const oldest = messages.find((message) => typeof message.seq === "number")?.seq;
+    if (!oldest || oldest <= 1) {
+      setHasMore(false);
+      return;
+    }
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    setOlderError(false);
+
+    try {
+      const res = await fetch(`/api/history?before=${oldest}&limit=${HISTORY_PAGE_SIZE}`, {
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error(`history ${res.status}`);
+
+      const page = (await res.json()) as HistoryResponse;
+      const older = page.messages ?? [];
+
+      if (older.length > 0) {
+        const el = scrollRef.current;
+        if (el) {
+          const anchor = el.querySelector<HTMLElement>("[data-seq]");
+
+          pendingPrependRef.current = {
+            anchorSeq: anchor?.dataset.seq ?? "",
+            anchorTop: anchor?.getBoundingClientRect().top ?? 0,
+            scrollHeight: el.scrollHeight,
+            scrollTop: el.scrollTop,
+          };
+        }
+
+        setMessages((prev) => mergeOlder(prev, older));
+      }
+
+      setHasMore(Boolean(page.hasMore));
+    } catch {
+      setOlderError(true);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [hasMore, messages]);
+
+  // 滚到顶部附近时自动加载上一页；按钮仍然保留，加载失败也可以手动重试。
+  useEffect(() => {
+    if (!hasMore) return;
+
+    const root = scrollRef.current;
+    const target = topSentinelRef.current;
+    if (!root || !target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadOlder();
+      },
+      { root, rootMargin: "240px 0px 0px 0px" },
+    );
+
+    observer.observe(target);
+
+    return () => observer.disconnect();
+  }, [hasMore, loadOlder]);
 
   // 连接只跟"会话"绑定：改名不应导致重连。
   const sessionID = user?.sessionId ?? "";
@@ -552,7 +765,7 @@ export default function App() {
         merged.push(msg);
       }
 
-      return merged.slice(-300);
+      return merged;
     };
 
     const handlePayload = (raw: string) => {
@@ -567,6 +780,7 @@ export default function App() {
 
       if (payload.type === "snapshot") {
         const history = payload.history ?? [];
+        const firstSnapshot = lastSeqRef.current === 0;
 
         // 快照带着服务端认定的"我是谁"，每次（重）连接都以它为准。
         // 用函数式更新比较，而不是读闭包里的 user：
@@ -594,7 +808,13 @@ export default function App() {
         }
 
         // 首次连接用快照替换；重连时只补进缺失的部分。
-        setMessages((prev) => (lastSeqRef.current === 0 ? history : mergeBySeq(prev, history)));
+        // 首次快照的 50 条是服务端内存上限，可能还有更早的库内历史。
+        if (firstSnapshot) {
+          setMessages(history);
+          setHasMore(history.length >= SNAPSHOT_HISTORY || payload.truncated === true);
+        } else {
+          setMessages((prev) => mergeBySeq(prev, history));
+        }
 
         if (payload.truncated) {
           console.warn("部分消息已过期，未能补发");
@@ -640,6 +860,11 @@ export default function App() {
         if (typeof payload.seq === "number") lastSeqRef.current = payload.seq;
 
         setMessages((prev) => mergeBySeq(prev, [payload]));
+
+        // 只有不在底部时才累计“新消息”；在底部时上面的 layout effect 会跟随。
+        if (payload.clientId && payload.clientId !== sessionID && !stickToBottomRef.current) {
+          setNewMessages((count) => count + 1);
+        }
 
         if (payload.clientId) {
           setTypingMap((prev) => {
@@ -812,6 +1037,9 @@ export default function App() {
       // ignore
     }
 
+    // 自己发消息时回到底部；收到别人的消息则只在本来就在底部时跟随。
+    scrollToBottom("smooth");
+
     // 如果服务端已经发过新版本，发完这条就刷新；消息已经进入 socket 队列。
     maybeReload();
 
@@ -840,9 +1068,36 @@ export default function App() {
         </div>
 
         {/* 消息流 */}
-        <ul {...stylex.props(styles.chatStream)}>
+        <ul ref={scrollRef} onScroll={handleScroll} {...stylex.props(styles.chatStream)}>
+          {messages.length > 0 &&
+            (hasMore || loadingOlder || olderError || messages.length >= SNAPSHOT_HISTORY) && (
+              <li ref={topSentinelRef} {...stylex.props(styles.loadOlderRow)}>
+                {loadingOlder ? (
+                  <span {...stylex.props(styles.loadOlderText)}>加载更早的消息…</span>
+                ) : olderError ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadOlder()}
+                    {...stylex.props(styles.loadOlderButton)}
+                  >
+                    加载失败，点击重试
+                  </button>
+                ) : hasMore ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadOlder()}
+                    {...stylex.props(styles.loadOlderButton)}
+                  >
+                    加载更早的消息
+                  </button>
+                ) : (
+                  <span {...stylex.props(styles.loadOlderText)}>已经是最早的消息</span>
+                )}
+              </li>
+            )}
+
           {messages.length === 0 ? (
-            <div {...stylex.props(styles.emptyNotice)}>NO DIALOGUE YET...</div>
+            <li {...stylex.props(styles.emptyNotice)}>NO DIALOGUE YET...</li>
           ) : (
             messages.map((item, idx) => {
               const isMe = item.clientId === user?.sessionId;
@@ -850,7 +1105,8 @@ export default function App() {
 
               return (
                 <li
-                  key={idx}
+                  key={item.seq ?? idx}
+                  data-seq={item.seq}
                   {...stylex.props(
                     styles.bubbleRow,
                     isMe ? styles.bubbleRowMe : styles.bubbleRowOther,
@@ -898,8 +1154,18 @@ export default function App() {
               );
             })
           )}
-          <div ref={messagesEndRef} />
         </ul>
+
+        {!atBottom && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom("smooth")}
+            aria-label="回到底部"
+            {...stylex.props(styles.jumpButton)}
+          >
+            {newMessages > 0 ? `${newMessages} 条新消息 ↓` : "回到底部 ↓"}
+          </button>
+        )}
 
         {/* 拟声词爆炸动效挂载 */}
         {effects.map((item) => (
