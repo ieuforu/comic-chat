@@ -139,6 +139,9 @@ const getHeroIndex = (str: string = "") => {
 const SNAPSHOT_HISTORY = 50;
 const HISTORY_PAGE_SIZE = 50;
 const SCROLL_NEAR_BOTTOM = 80;
+// 最新这些消息始终真实渲染：它们的真实高度决定底部位置。更早的消息才做
+// content-visibility 虚拟化，避免 intrinsic-size 估算让最新气泡被截掉。
+const ALWAYS_RENDER_RECENT = 20;
 
 // 旧消息页是升序的，直接按 seq 合并并排序，避免依赖到达顺序。
 const mergeOlder = (prev: EventMessage[], older: EventMessage[]): EventMessage[] => {
@@ -230,7 +233,9 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     position: "relative",
-    // 浏览器原生虚拟化：离屏消息跳过渲染，但仍保留在 DOM 中供 Ctrl+F 等使用。
+  },
+  bubbleRowVirtual: {
+    // 只对较旧的消息启用：离屏跳过渲染，同时保留 DOM 供 Ctrl+F 等使用。
     contentVisibility: "auto",
     containIntrinsicSize: "auto 96px",
   },
@@ -724,14 +729,21 @@ export default function App() {
       if (scrollRef.current === el) el.scrollTop = el.scrollHeight;
     };
 
-    // 发送消息后等回显真正进入列表，再滚到包含这条消息的新底部。
+    // 发送消息后等回显真正进入列表，再按真实高度落到底部。这里用瞬时定位
+    // 而不是 smooth：平滑滚动的目标在执行时就固定了，之后气泡真实高度变化
+    // 会让它停在“元信息可见、气泡被截一半”的位置。
     if (forceBottomRef.current) {
       forceBottomRef.current = false;
       stickToBottomRef.current = true;
       setNewMessages(0);
       setAtBottom(true);
-      beginProgrammaticScroll();
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+
+      const settle = () => {
+        if (scrollRef.current === el) el.scrollTop = el.scrollHeight;
+      };
+
+      settle();
+      requestAnimationFrame(settle);
       return;
     }
 
@@ -1139,9 +1151,10 @@ export default function App() {
       // ignore
     }
 
-    // 自己发消息时回到底部：先给出即时反馈，回显到达后再按新高度校正一次。
+    // 自己发消息时回到底部：先即时跳到当前底部，回显到达后再按真实高度校正。
+    // 不用 smooth，避免发送时的滚动目标和回显后的新高度打架。
     forceBottomRef.current = true;
-    scrollToBottom("smooth");
+    scrollToBottom("auto");
 
     // 如果服务端已经发过新版本，发完这条就刷新；消息已经进入 socket 队列。
     maybeReload();
@@ -1216,6 +1229,7 @@ export default function App() {
             messages.map((item, idx) => {
               const isMe = item.clientId === user?.sessionId;
               const themeIdx = getHeroIndex(item.clientId || String(idx));
+              const virtualize = idx < messages.length - ALWAYS_RENDER_RECENT;
 
               return (
                 <li
@@ -1224,6 +1238,7 @@ export default function App() {
                   {...stylex.props(
                     styles.bubbleRow,
                     isMe ? styles.bubbleRowMe : styles.bubbleRowOther,
+                    virtualize && styles.bubbleRowVirtual,
                   )}
                 >
                   <div {...stylex.props(styles.metaRow)}>
