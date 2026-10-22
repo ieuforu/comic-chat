@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="index,follow" />
+    <title>社区规则 · comic chat</title>
+    <style>
+      :root {
+        --ink: #000000;
+        --paper: #ffffff;
+        --canvas: #e9edf3;
+        --muted: #52525b;
+        --yellow: #fef08a;
+        --red: #ef4444;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 28px 16px;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        line-height: 1.65;
+      }
+
+      .paper {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 30px 34px;
+        background-color: var(--paper);
+        background-image: radial-gradient(rgba(0, 0, 0, 0.055) 1px, transparent 1.1px);
+        background-size: 14px 14px;
+        border: 3px solid var(--ink);
+        box-shadow: 8px 8px 0 var(--ink);
+      }
+
+      .tag {
+        display: inline-block;
+        padding: 3px 10px;
+        background: var(--yellow);
+        border: 2px solid var(--ink);
+        box-shadow: 3px 3px 0 var(--ink);
+        font-family: monospace;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+
+      h1 {
+        margin: 14px 0 6px;
+        font-family: "Impact", "Arial Black", sans-serif;
+        font-size: 34px;
+        line-height: 1.05;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+
+      .lead {
+        margin: 0 0 22px;
+        padding-bottom: 18px;
+        border-bottom: 3px solid var(--ink);
+        color: var(--muted);
+      }
+
+      h2 {
+        margin: 24px 0 8px;
+        font-size: 17px;
+      }
+
+      ul {
+        margin: 8px 0 0;
+        padding-left: 22px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      .warn {
+        margin: 18px 0;
+        padding: 12px 14px;
+        background: #ffe4e6;
+        border: 3px solid var(--ink);
+        box-shadow: 4px 4px 0 var(--red);
+        font-weight: 700;
+      }
+
+      .box {
+        margin: 18px 0;
+        padding: 12px 14px;
+        background: var(--yellow);
+        border: 3px solid var(--ink);
+        box-shadow: 4px 4px 0 var(--ink);
+      }
+
+      a {
+        color: var(--ink);
+        text-decoration-thickness: 2px;
+        text-underline-offset: 3px;
+      }
+
+      footer {
+        margin-top: 26px;
+        padding-top: 14px;
+        border-top: 3px solid var(--ink);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 18px;
+        justify-content: space-between;
+        font-family: monospace;
+        font-size: 12px;
+      }
+
+      code {
+        padding: 1px 5px;
+        background: #f4f4f5;
+        border: 1px solid #d4d4d8;
+        font-family: monospace;
+        font-size: 0.92em;
+      }
+
+      @media (max-width: 560px) {
+        body {
+          padding: 16px 10px;
+        }
+
+        .paper {
+          padding: 22px 18px;
+          box-shadow: 5px 5px 0 var(--ink);
+        }
+
+        h1 {
+          font-size: 28px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="paper">
+      <span class="tag">PUBLIC ROOM / 公开房间</span>
+      <h1>Community Rules</h1>
+      <p class="lead">
+        这是公开聊天室：你发送的文字、图片、显示名，以及在线状态，都会被其他访问者看到。
+        请不要把这里当成私密空间。
+      </p>
+
+      <div class="warn">
+        不要发送任何违法内容，包括儿童性剥削内容、暴恐、诈骗、恶意软件、仇恨与骚扰、
+        人肉搜索、他人隐私或未经同意的私密影像。发现即删除，并可能直接关闭整个站点。
+      </div>
+
+      <h2>1. 可以做什么</h2>
+      <ul>
+        <li>聊天、发图片、讨论技术或日常，保持基本的尊重。</li>
+        <li>用 Ctrl+V 粘贴 PNG / JPEG / GIF / WebP 图片，单张不超过 3 MB。</li>
+        <li>对规则或删除有异议，可以通过下方联系方式申诉。</li>
+      </ul>
+
+      <h2>2. 不要做什么</h2>
+      <ul>
+        <li>不要发广告、刷屏、重复粘贴、恶意 @ 或绕过频控。</li>
+        <li>不要冒充他人，包括伪造显示名、头像或会话身份。</li>
+        <li>不要上传恶意文件、探测/攻击服务、尝试获取他人会话或管理权限。</li>
+        <li>不要发布他人的姓名、电话、住址、身份证件、工作单位等隐私信息。</li>
+        <li>不要发布 NSFW、血腥、虐待动物或其他不适合公开场所的内容。</li>
+      </ul>
+
+      <h2>3. 消息、图片与保留期</h2>
+      <ul>
+        <li>聊天文字最多保留最近 2000 条；更早的消息会被清理。</li>
+        <li>图片默认保留 72 小时，到期自动删除；但可能因运营需要提前删除。</li>
+        <li>运营者可以删除任意消息和关联图片；删除后在线页面会同步移除。</li>
+        <li>服务可能随时维护、限流、关闭；不要依赖它保存重要内容。</li>
+      </ul>
+
+      <h2>4. 身份与隐私</h2>
+      <ul>
+        <li>没有账号系统。身份由服务端签发的 <code>sid</code> cookie 决定，有效期 180 天。</li>
+        <li>昵称和头像由服务端派生，客户端不能任意修改；运营者可以调整显示名。</li>
+        <li>清除 cookie、换浏览器或换设备会变成一个新身份。</li>
+        <li>消息、图片和必要的运行日志保存在服务器；反向代理可能记录 IP 与时间。</li>
+        <li>本站不做广告追踪；请勿在公开消息里填写敏感个人信息。</li>
+      </ul>
+
+      <h2>5. 举报与处理</h2>
+      <ul>
+        <li>举报请提供消息序号、时间、截图或页面链接。</li>
+        <li>可以通过 GitHub <a href="https://github.com/ieuforu" target="_blank" rel="noreferrer">@ieuforu</a>
+          或仓库 <a href="https://github.com/ieuforu/comic-chat/issues" target="_blank" rel="noreferrer">Issues</a>
+          联系运营者；涉及敏感内容时请先只发“需要私下联系”。</li>
+        <li>运营者可以删除内容、限制访问或直接停止服务，且不保证提前通知。</li>
+      </ul>
+
+      <h2>6. 未成年人</h2>
+      <p>
+        不建议未成年人使用本公开聊天室。若发现涉及未成年人的不当内容，将立即删除并保留
+        必要记录，必要时向平台或执法机构报告。
+      </p>
+
+      <div class="box">
+        <strong>English summary:</strong> This is a public chat. Do not post illegal,
+        sexual, violent, hateful, harassing, or private content. Images are limited to
+        3 MB and kept for about 72 hours. Messages may be deleted and the service may be
+        closed at any time. Report abuse via GitHub @ieuforu.
+      </div>
+
+      <footer>
+        <span>最后更新：2026-10-22</span>
+        <span><a href="/">← 回到聊天室 / Back to chat</a></span>
+      </footer>
+    </main>
+  </body>
+</html>

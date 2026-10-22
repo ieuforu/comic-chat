@@ -158,6 +158,22 @@ export const styles = stylex.create({
     textTransform: "uppercase",
     letterSpacing: "0.05em",
   },
+  titleMeta: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  rulesLink: {
+    fontFamily: "monospace",
+    fontSize: 10,
+    fontWeight: "bold",
+    color: "#000000",
+    textDecorationLine: "underline",
+    textDecorationThickness: 2,
+    textUnderlineOffset: 3,
+    whiteSpace: "nowrap",
+  },
   buildBadge: {
     fontFamily: "monospace",
     fontSize: 10,

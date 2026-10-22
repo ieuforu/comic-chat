@@ -14,9 +14,19 @@ export function PanelHeader({ buildId, connected, retrying, onlineCount }: Panel
     <div {...stylex.props(styles.panelHeader)}>
       <div {...stylex.props(styles.titleBlock)}>
         <h1 {...stylex.props(styles.comicTitle)}>PANEL // DIALOGUE</h1>
-        <span {...stylex.props(styles.buildBadge)} title="当前页面加载的前端 build">
-          BUILD {buildId || "dev"}
-        </span>
+        <div {...stylex.props(styles.titleMeta)}>
+          <span {...stylex.props(styles.buildBadge)} title="当前页面加载的前端 build">
+            BUILD {buildId || "dev"}
+          </span>
+          <a
+            href="/rules.html"
+            target="_blank"
+            rel="noreferrer"
+            {...stylex.props(styles.rulesLink)}
+          >
+            规则 / RULES
+          </a>
+        </div>
       </div>
       <div {...stylex.props(styles.presenceBadge)}>
         <span>⚡</span>

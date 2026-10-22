@@ -17,6 +17,7 @@ internal/chat/          聊天领域逻辑，外部无法 import
   roles.go                角色池（服务端唯一来源）
 cmd/loadtest/           压测器（独立可执行）
 web/                    React 19 + StyleX，构建到 web/dist
+  public/rules.html       公开房间的社区规则 / 隐私说明
   src/App.tsx             容器：输入 / 发送 / 上传 / 页面组合
   src/chat/components/    PanelHeader、MessageStream、MessageRow、Composer 等展示组件
   src/chat/hooks/         useChatSocket、useChatScroll、useHistoryPagination、useAutoReload、useComicFx
@@ -203,6 +204,16 @@ docker run --rm -p 8080:8080 -v comic-data:/data comic-chat
 ```
 
 镜像使用 distroless nonroot，`STATE_DIR=/data` 是唯一需要持久化的卷。
+
+## 社区规则与关闭
+
+- 公开房间的规则页：`/rules.html`，面板顶部有「规则 / RULES」入口。
+- 需要立即下线时：
+  ```bash
+  systemctl stop comic      # 立即停止服务（Caddy 会返回 502）
+  systemctl disable comic   # 可选：禁止开机自启
+  ```
+  重新开放用 `systemctl start comic`。停服前如需保留现场，先备份 `STATE_DIR`。
 
 ## 图片消息
 
