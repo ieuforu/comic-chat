@@ -6,6 +6,10 @@
 一个 Go + React 的实时通信实验：WebSocket 消息、在线人数、输入状态，前端构建产物用
 `go:embed` 打进二进制，**交付物就是一个可执行的单文件**。
 
+![comic chat 界面](docs/screenshot.png)
+
+<sub>公开演示：<https://comic.selena.ink> · <a href="https://comic.selena.ink/rules.html">规则页</a> · 学习项目，不是 IM 产品</sub>
+
 ## 结构
 
 ```
@@ -27,6 +31,7 @@ web/                    React 19 + StyleX，构建到 web/dist
   src/chat/               types / constants / messages / theme / styles
 Makefile                make check / build / run / loadtest
 deploy.sh               构建并部署（服务器地址从环境变量读取）
+docs/screenshot.png      界面截图（README 展示用）
 Dockerfile              多阶段构建：前端 → Go 静态二进制 → distroless nonroot
 .github/workflows/      CI：make check + make build
 ```
