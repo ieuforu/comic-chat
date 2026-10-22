@@ -118,6 +118,8 @@ type Hub struct {
 	// profiles carries rename notifications into the event loop; the clients map is
 	// owned by Run, so this cannot be fanned out from the caller's goroutine.
 	profiles chan profileUpdate
+	// deletes carries admin deletions into the same single-owner event loop.
+	deletes chan uint64
 	// stop/done let Shutdown hand the teardown to the Run goroutine instead of
 	// reaching into its map from another one.
 	stop chan struct{}
@@ -162,6 +164,15 @@ func (h *Hub) BroadcastProfile(prefix, display string) {
 	default:
 		// A full queue means renames are being spammed; the next client request still
 		// sees the new name, so dropping is safe.
+	}
+}
+
+// Delete removes a message from memory and storage, then broadcasts a delete
+// event so connected clients can drop it without a refresh.
+func (h *Hub) Delete(seq uint64) {
+	select {
+	case h.deletes <- seq:
+	case <-h.done:
 	}
 }
 
@@ -255,6 +266,7 @@ func NewHub() *Hub {
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		profiles:   make(chan profileUpdate, 64),
+		deletes:    make(chan uint64, 64),
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
 	}
@@ -410,6 +422,31 @@ func (h *Hub) Run() {
 				close(client.send)
 				log.Printf("客户端退出，当前在线: %d", len(h.clients))
 				h.broadcastPresence()
+			}
+
+		case seq := <-h.deletes:
+			h.mu.Lock()
+			for i := range h.history {
+				if h.history[i].Seq == seq {
+					h.history = append(h.history[:i], h.history[i+1:]...)
+					break
+				}
+			}
+			h.mu.Unlock()
+
+			if deleter, ok := h.sink.(interface{ Delete(uint64) error }); ok {
+				if err := deleter.Delete(seq); err != nil {
+					log.Printf("警告: 删除历史消息失败: %v", err)
+				}
+			}
+
+			if payload, err := json.Marshal(EventMessage{Type: "delete", Seq: seq}); err == nil {
+				for client := range h.clients {
+					select {
+					case client.send <- payload:
+					default:
+					}
+				}
 			}
 
 		case update := <-h.profiles:

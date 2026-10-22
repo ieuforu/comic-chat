@@ -259,6 +259,40 @@ func reverseHistory(reversed []EventMessage) []EventMessage {
 	return out
 }
 
+// Message returns one persisted message by sequence number. Used by the admin
+// delete path to clean up an attached image before the row disappears.
+func (s *HistoryStore) Message(seq uint64) (EventMessage, bool, error) {
+	rows, err := s.db.Query(
+		`SELECT seq, session_id, sender, content, time, kind FROM messages WHERE seq = ?`,
+		seq,
+	)
+	if err != nil {
+		return EventMessage{}, false, fmt.Errorf("load message: %w", err)
+	}
+	defer rows.Close()
+
+	messages, err := readHistoryRows(rows)
+	if err != nil {
+		return EventMessage{}, false, err
+	}
+
+	if len(messages) == 0 {
+		return EventMessage{}, false, nil
+	}
+
+	return messages[0], true, nil
+}
+
+// Delete removes one persisted message. It is synchronous so an admin deletion
+// is durable before the caller returns.
+func (s *HistoryStore) Delete(seq uint64) error {
+	if _, err := s.db.Exec(`DELETE FROM messages WHERE seq = ?`, seq); err != nil {
+		return fmt.Errorf("delete message: %w", err)
+	}
+
+	return nil
+}
+
 // Append enqueues a message for persistence. It never blocks the caller: when the
 // queue is full the message is dropped and counted, because a chat that keeps
 // running is more useful than one that stalls on a slow disk.

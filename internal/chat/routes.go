@@ -14,11 +14,12 @@ import (
 // httptest.Server without binding a real port.
 // Deps are the collaborators the HTTP layer needs.
 type Deps struct {
-	Hub      *Hub
-	Sessions *SessionStore
-	Media    *MediaStore
-	History  *HistoryStore
-	StaticFS fs.FS
+	Hub        *Hub
+	Sessions   *SessionStore
+	Media      *MediaStore
+	History    *HistoryStore
+	AdminToken string
+	StaticFS   fs.FS
 	// IndexHTML is the SPA shell with the build id injected. When nil, Routes reads
 	// index.html from StaticFS (which keeps tests and small embeddings working).
 	IndexHTML []byte
@@ -61,6 +62,7 @@ func Routes(deps Deps) http.Handler {
 	store.routes(mux)
 	historyRoutes(mux, deps.History, store)
 	mediaRoutes(mux, deps.Media, store)
+	adminRoutes(mux, hub, deps.History, deps.Media, deps.AdminToken)
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		// The session cookie is the only identity. Without it there is nothing to

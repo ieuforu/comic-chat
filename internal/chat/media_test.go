@@ -305,3 +305,20 @@ func TestMediaStoreWithoutDB(t *testing.T) {
 }
 
 var _ = sql.ErrNoRows
+
+func TestMediaDeleteRemovesFileAndRow(t *testing.T) {
+	media := newTestMedia(t, newTestStore(t))
+
+	id, _, _, err := media.Save("session-1", bytes.NewReader(pngBytes(t)))
+	if err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := media.Delete(id); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, _, err := media.Open(id); err == nil {
+		t.Fatal("Open after Delete should fail")
+	}
+}

@@ -1,0 +1,9 @@
+.git
+.github
+.state
+server-linux
+web/node_modules
+web/dist
+.deploy.env
+.deploy.env.*
+!.deploy.env.example

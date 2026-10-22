@@ -154,6 +154,38 @@ func TestLoadBeforePagesBackwards(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesPersistedMessage(t *testing.T) {
+	store, _ := newTestHistory(t, 0)
+	defer store.Close()
+
+	for i := uint64(1); i <= 3; i++ {
+		store.Append(msg(i, "m"))
+	}
+
+	waitForHistory(t, store, 3)
+
+	if got, ok, err := store.Message(2); err != nil || !ok || got.Seq != 2 {
+		t.Fatalf("Message(2) = %+v/%v/%v", got, ok, err)
+	}
+
+	if err := store.Delete(2); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	recent, _, err := store.LoadRecent(10)
+	if err != nil {
+		t.Fatalf("LoadRecent: %v", err)
+	}
+
+	if len(recent) != 2 || recent[0].Seq != 1 || recent[1].Seq != 3 {
+		t.Fatalf("remaining seqs = %+v, want [1 3]", recent)
+	}
+
+	if _, ok, err := store.Message(2); err != nil || ok {
+		t.Fatalf("Message(2) after delete = %v/%v, want false/nil", ok, err)
+	}
+}
+
 func TestLoadRecentReturnsNewestInAscendingOrder(t *testing.T) {
 	store, _ := newTestHistory(t, 0)
 	defer store.Close()

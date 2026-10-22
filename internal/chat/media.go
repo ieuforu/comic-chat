@@ -220,6 +220,30 @@ func (s *MediaStore) Owns(id, sessionID string) bool {
 	return owner == sessionID
 }
 
+// Delete removes one uploaded image and its row. Admin moderation uses it before
+// deleting an image message, so the direct /media URL disappears immediately
+// instead of waiting for the TTL.
+func (s *MediaStore) Delete(id string) error {
+	if !validMediaID(id) {
+		return nil
+	}
+
+	var mime string
+	err := s.db.QueryRow(`SELECT mime FROM media WHERE id = ?`, id).Scan(&mime)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	os.Remove(filepath.Join(s.dir, id+allowedMimes[mime])) //nolint:errcheck // best effort
+
+	_, err = s.db.Exec(`DELETE FROM media WHERE id = ?`, id)
+
+	return err
+}
+
 // Prune deletes files and rows past the TTL. Chat text is kept forever; only the
 // binaries age out, which is what keeps a small disk from filling up.
 func (s *MediaStore) Prune() (int, error) {

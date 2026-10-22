@@ -23,6 +23,8 @@ web/                    React 19 + StyleX，构建到 web/dist
   src/chat/               types / constants / messages / theme / styles
 Makefile                make check / build / run / loadtest
 deploy.sh               构建并部署（服务器地址从环境变量读取）
+Dockerfile              多阶段构建：前端 → Go 静态二进制 → distroless nonroot
+.github/workflows/      CI：make check + make build
 ```
 
 `internal/` 是编译器强制的边界：`internal/chat` 只能被 `github.com/ieuforu/comic` 之下的代码导入，
@@ -128,6 +130,7 @@ WebSocket `/ws`，单一 JSON 事件契约：
 | `presence` | S→C | 人数 / 连接数变化 |
 | `typing` | C→S→C | 输入状态，不进入历史 |
 | `profile` | S→C | 运营者改了昵称，携带 `clientId`（会话前缀）与新的显示名 |
+| `delete` | S→C | 运营者删除了某条消息，携带 `seq`；客户端立即从列表移除 |
 
 ## 配置
 
@@ -136,6 +139,7 @@ WebSocket `/ws`，单一 JSON 事件契约：
 | `ADDR` | `:8080` | 监听地址 |
 | `ALLOWED_ORIGINS` | 空（仅同源） | 逗号分隔的额外允许来源 |
 | `SESSION_SECRET` | 空 → 自动生成并保存 | cookie 签名密钥；不设也能跨重启保持，显式设置便于多实例共享 |
+| `ADMIN_TOKEN` | 空（管理接口关闭） | 设置后才启用 `POST /api/admin/delete`，请求头 `X-Admin-Token` |
 | `STATE_DIR` | `./.state` | 运行状态目录：`session-secret` 与 `history.db`，需可写 |
 
 ## 已加固
@@ -176,6 +180,29 @@ GET /api/history?before=<seq>&limit=50      # 需要会话 cookie
 - 收到新消息时，只有当前已经在底部附近（80px 内）才跟随；否则显示「N 条新消息 ↓」，
   点击平滑回到底部。自己发消息会主动回到底部。
 - 数据库只保留最近 2000 条，再早的消息无法回看。
+
+## 管理删除
+
+设置 `ADMIN_TOKEN` 后启用一个最小管理接口：
+
+```bash
+curl -X POST https://your-host/api/admin/delete \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"seq": 123}'
+```
+
+服务端会同时从内存历史、SQLite 和关联图片中删除，并广播 `delete` 事件让在线页面立即移除。
+未设置 `ADMIN_TOKEN` 时接口不存在（404）。删除不会回填 `seq`，后续消息编号继续递增。
+
+## Docker
+
+```bash
+docker build -t comic-chat .
+docker run --rm -p 8080:8080 -v comic-data:/data comic-chat
+```
+
+镜像使用 distroless nonroot，`STATE_DIR=/data` 是唯一需要持久化的卷。
 
 ## 图片消息
 

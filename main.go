@@ -102,12 +102,13 @@ func main() {
 	srv := &http.Server{
 		Addr: addr,
 		Handler: chat.Routes(chat.Deps{
-			Hub:       hub,
-			Sessions:  store,
-			Media:     media,
-			History:   history,
-			StaticFS:  staticFS,
-			IndexHTML: assets.IndexHTML,
+			Hub:        hub,
+			Sessions:   store,
+			Media:      media,
+			History:    history,
+			AdminToken: os.Getenv("ADMIN_TOKEN"),
+			StaticFS:   staticFS,
+			IndexHTML:  assets.IndexHTML,
 		}),
 		// Without a header timeout a client can hold a connection open by
 		// dribbling bytes and slowly exhaust the listener.

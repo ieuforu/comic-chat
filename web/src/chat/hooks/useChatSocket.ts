@@ -172,6 +172,11 @@ export function useChatSocket({
       } else if (payload.type === "notice") {
         // 服务端限流时的提示，2 秒后自动消失
         showNotice(payload.notice ?? "");
+      } else if (payload.type === "delete") {
+        // 运营者删除了某条消息：已加载的列表里也立即去掉，不需要刷新。
+        if (typeof payload.seq === "number") {
+          setMessages((prev) => prev.filter((message) => message.seq !== payload.seq));
+        }
       } else if (payload.type === "chat" || payload.type === "image") {
         // 补发与实时消息可能重叠，按 seq 丢弃已见过的。
         if (typeof payload.seq === "number" && payload.seq <= lastSeqRef.current) return;

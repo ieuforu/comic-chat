@@ -1,5 +1,13 @@
 export interface EventMessage {
-  type: "chat" | "image" | "snapshot" | "presence" | "typing" | "notice" | "profile";
+  type:
+    | "chat"
+    | "image"
+    | "delete"
+    | "snapshot"
+    | "presence"
+    | "typing"
+    | "notice"
+    | "profile";
   clientId?: string;
   sender?: string;
   content?: string;
