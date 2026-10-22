@@ -364,6 +364,16 @@ export const styles = stylex.create({
     gap: 8,
     minWidth: 0,
   },
+  learningNote: {
+    marginTop: 5,
+    paddingTop: 4,
+    borderTop: "1px dashed #d4d4d8",
+    textAlign: "center",
+    fontFamily: "monospace",
+    fontSize: 9,
+    letterSpacing: "0.04em",
+    color: "#71717a",
+  },
   bubbleImage: {
     padding: 4,
   },

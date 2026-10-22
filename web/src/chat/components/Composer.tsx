@@ -76,6 +76,10 @@ export function Composer({
             POW!
           </button>
         </form>
+
+        <div {...stylex.props(styles.learningNote)}>
+          LEARNING PROJECT · 非 IM · 随时可能关闭
+        </div>
       </div>
     </>
   );
